@@ -1,81 +1,38 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
-import { categoriesTable, productsTable } from "@workspace/db";
-import { eq, count } from "drizzle-orm";
+import { db } from "../lib/sqlite";
+import { getAuthUser } from "./auth";
 
 const router = Router();
 
-router.get("/categories", async (req, res) => {
-  try {
-    const cats = await db.select().from(categoriesTable).orderBy(categoriesTable.sortOrder);
-    const withCounts = await Promise.all(
-      cats.map(async (cat) => {
-        const [result] = await db.select({ cnt: count() }).from(productsTable).where(eq(productsTable.categoryId, cat.id));
-        return { ...cat, productCount: Number(result?.cnt ?? 0) };
-      })
-    );
-    res.json(withCounts);
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+router.get("/categories", (_req, res) => {
+  const rows = db.prepare("SELECT id, name, color FROM categories ORDER BY name").all();
+  res.json(rows);
 });
 
-router.post("/categories", async (req, res) => {
-  try {
-    const { name, nameAr, description, icon, color, sortOrder } = req.body;
-    const [cat] = await db.insert(categoriesTable).values({ name, nameAr, description, icon, color, sortOrder: sortOrder ?? 0 }).returning();
-    res.status(201).json({ ...cat, productCount: 0 });
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+router.post("/categories", (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) { res.status(401).json({ error: "غير مصرح" }); return; }
+  const { name, color } = req.body;
+  if (!name) { res.status(400).json({ error: "الاسم مطلوب" }); return; }
+  const r = db.prepare("INSERT INTO categories (name, color) VALUES (?,?)").run(name, color ?? null);
+  const cat = db.prepare("SELECT * FROM categories WHERE id=?").get(r.lastInsertRowid);
+  res.status(201).json(cat);
 });
 
-router.get("/categories/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const [cat] = await db.select().from(categoriesTable).where(eq(categoriesTable.id, id));
-    if (!cat) return res.status(404).json({ error: "Not found" });
-    const [result] = await db.select({ cnt: count() }).from(productsTable).where(eq(productsTable.categoryId, id));
-    res.json({ ...cat, productCount: Number(result?.cnt ?? 0) });
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+router.put("/categories/:id", (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) { res.status(401).json({ error: "غير مصرح" }); return; }
+  const { name, color } = req.body;
+  db.prepare("UPDATE categories SET name=?, color=? WHERE id=?").run(name, color ?? null, req.params.id);
+  const cat = db.prepare("SELECT * FROM categories WHERE id=?").get(req.params.id);
+  res.json(cat);
 });
 
-router.patch("/categories/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const { name, nameAr, description, icon, color, sortOrder, isActive } = req.body;
-    const updates: Record<string, unknown> = {};
-    if (name !== undefined) updates.name = name;
-    if (nameAr !== undefined) updates.nameAr = nameAr;
-    if (description !== undefined) updates.description = description;
-    if (icon !== undefined) updates.icon = icon;
-    if (color !== undefined) updates.color = color;
-    if (sortOrder !== undefined) updates.sortOrder = sortOrder;
-    if (isActive !== undefined) updates.isActive = isActive;
-    const [cat] = await db.update(categoriesTable).set(updates).where(eq(categoriesTable.id, id)).returning();
-    if (!cat) return res.status(404).json({ error: "Not found" });
-    const [result] = await db.select({ cnt: count() }).from(productsTable).where(eq(productsTable.categoryId, id));
-    res.json({ ...cat, productCount: Number(result?.cnt ?? 0) });
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-router.delete("/categories/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    await db.delete(categoriesTable).where(eq(categoriesTable.id, id));
-    res.status(204).send();
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+router.delete("/categories/:id", (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) { res.status(401).json({ error: "غير مصرح" }); return; }
+  db.prepare("DELETE FROM categories WHERE id=?").run(req.params.id);
+  res.status(204).send();
 });
 
 export default router;

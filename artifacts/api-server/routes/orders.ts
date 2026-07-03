@@ -107,6 +107,17 @@ router.post("/orders", (req, res) => {
   res.status(201).json(formatOrder(order, orderItems));
 });
 
+router.get("/orders/by-invoice/:invoiceNumber", (req, res) => {
+  const order = db.prepare(`
+    SELECT o.*, u.name as user_name, c.name as customer_name
+    FROM orders o LEFT JOIN users u ON u.id=o.user_id LEFT JOIN customers c ON c.id=o.customer_id
+    WHERE o.invoice_number=?
+  `).get(req.params.invoiceNumber) as any;
+  if (!order) { res.status(404).json({ error: "الفاتورة غير موجودة" }); return; }
+  const items = db.prepare("SELECT * FROM order_items WHERE order_id=?").all(order.id) as any[];
+  res.json(formatOrder(order, items));
+});
+
 router.get("/orders/:id", (req, res) => {
   const order = db.prepare(`
     SELECT o.*, u.name as user_name, c.name as customer_name

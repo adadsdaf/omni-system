@@ -1,80 +1,48 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
-import { customersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db } from "../lib/sqlite";
+import { getAuthUser } from "./auth";
 
 const router = Router();
 
-function fmt(c: Record<string, unknown>) {
-  return { ...c, totalSpent: Number(c.totalSpent ?? 0) };
-}
-
-router.get("/customers", async (req, res) => {
-  try {
-    const { search } = req.query;
-    let rows = await db.select().from(customersTable).orderBy(customersTable.createdAt);
-    if (search) {
-      const s = String(search).toLowerCase();
-      rows = rows.filter((c) => c.name.toLowerCase().includes(s) || (c.phone ?? "").includes(s));
-    }
-    res.json(rows.map((c) => fmt(c as Record<string, unknown>)));
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+router.get("/customers", (_req, res) => {
+  const rows = db.prepare(`
+    SELECT c.id, c.name, c.phone, c.email, c.address, c.created_at as createdAt,
+           COALESCE(SUM(o.total), 0) as totalPurchases
+    FROM customers c
+    LEFT JOIN orders o ON o.customer_id = c.id
+    GROUP BY c.id ORDER BY c.name
+  `).all();
+  res.json(rows);
 });
 
-router.post("/customers", async (req, res) => {
-  try {
-    const { name, phone, email, address, notes } = req.body;
-    const [customer] = await db.insert(customersTable).values({ name, phone, email, address, notes }).returning();
-    res.status(201).json(fmt(customer as Record<string, unknown>));
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+router.post("/customers", (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) { res.status(401).json({ error: "غير مصرح" }); return; }
+  const { name, phone, email, address } = req.body;
+  if (!name) { res.status(400).json({ error: "الاسم مطلوب" }); return; }
+  const r = db.prepare("INSERT INTO customers (name, phone, email, address) VALUES (?,?,?,?)").run(name, phone ?? null, email ?? null, address ?? null);
+  const cust = db.prepare("SELECT *, 0 as totalPurchases, created_at as createdAt FROM customers WHERE id=?").get(r.lastInsertRowid);
+  res.status(201).json(cust);
 });
 
-router.get("/customers/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const [customer] = await db.select().from(customersTable).where(eq(customersTable.id, id));
-    if (!customer) return res.status(404).json({ error: "Not found" });
-    res.json(fmt(customer as Record<string, unknown>));
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+router.put("/customers/:id", (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) { res.status(401).json({ error: "غير مصرح" }); return; }
+  const { name, phone, email, address } = req.body;
+  db.prepare("UPDATE customers SET name=?, phone=?, email=?, address=? WHERE id=?").run(name, phone ?? null, email ?? null, address ?? null, req.params.id);
+  const cust = db.prepare(`
+    SELECT c.id, c.name, c.phone, c.email, c.address, c.created_at as createdAt,
+           COALESCE(SUM(o.total), 0) as totalPurchases
+    FROM customers c LEFT JOIN orders o ON o.customer_id = c.id WHERE c.id=?
+  `).get(req.params.id);
+  res.json(cust);
 });
 
-router.patch("/customers/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const { name, phone, email, address, notes } = req.body;
-    const updates: Record<string, unknown> = {};
-    if (name !== undefined) updates.name = name;
-    if (phone !== undefined) updates.phone = phone;
-    if (email !== undefined) updates.email = email;
-    if (address !== undefined) updates.address = address;
-    if (notes !== undefined) updates.notes = notes;
-    const [customer] = await db.update(customersTable).set(updates).where(eq(customersTable.id, id)).returning();
-    if (!customer) return res.status(404).json({ error: "Not found" });
-    res.json(fmt(customer as Record<string, unknown>));
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-router.delete("/customers/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    await db.delete(customersTable).where(eq(customersTable.id, id));
-    res.status(204).send();
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+router.delete("/customers/:id", (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) { res.status(401).json({ error: "غير مصرح" }); return; }
+  db.prepare("DELETE FROM customers WHERE id=?").run(req.params.id);
+  res.status(204).send();
 });
 
 export default router;

@@ -1,97 +1,114 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
-import { ordersTable, orderItemsTable, productsTable, categoriesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db } from "../lib/sqlite";
 
 const router = Router();
 
-router.get("/reports/sales", async (req, res) => {
-  try {
-    const { from, to } = req.query;
-    let orders = await db.select().from(ordersTable).where(eq(ordersTable.status, "paid"));
+router.get("/reports/sales", (req, res) => {
+  const { startDate, endDate, groupBy = "day" } = req.query;
+  let format = "%Y-%m-%d";
+  if (groupBy === "month") format = "%Y-%m";
+  if (groupBy === "year") format = "%Y";
 
-    if (from) orders = orders.filter((o) => new Date(o.createdAt) >= new Date(String(from)));
-    if (to) orders = orders.filter((o) => new Date(o.createdAt) <= new Date(String(to)));
+  let sql = `
+    SELECT strftime(?, created_at) as period,
+           COALESCE(SUM(total), 0) as total,
+           COALESCE(SUM(subtotal), 0) as subtotal,
+           COALESCE(SUM(discount), 0) as discount,
+           COALESCE(SUM(tax), 0) as tax,
+           COUNT(*) as orders
+    FROM orders WHERE 1=1
+  `;
+  const params: any[] = [format];
+  if (startDate) { sql += " AND DATE(created_at)>=?"; params.push(startDate); }
+  if (endDate) { sql += " AND DATE(created_at)<=?"; params.push(endDate); }
+  sql += " GROUP BY period ORDER BY period";
 
-    const totalRevenue = orders.reduce((a, o) => a + Number(o.total), 0);
-    const totalDiscount = orders.reduce((a, o) => a + Number(o.discount), 0);
-    const totalTax = orders.reduce((a, o) => a + Number(o.tax), 0);
-    const averageOrderValue = orders.length > 0 ? totalRevenue / orders.length : 0;
-
-    const byPaymentMethod: Record<string, { count: number; total: number }> = {};
-    const byOrderType: Record<string, { count: number; total: number }> = {};
-
-    for (const o of orders) {
-      const pm = o.paymentMethod ?? "cash";
-      if (!byPaymentMethod[pm]) byPaymentMethod[pm] = { count: 0, total: 0 };
-      byPaymentMethod[pm].count++;
-      byPaymentMethod[pm].total += Number(o.total);
-
-      if (!byOrderType[o.type]) byOrderType[o.type] = { count: 0, total: 0 };
-      byOrderType[o.type].count++;
-      byOrderType[o.type].total += Number(o.total);
-    }
-
-    res.json({
-      totalRevenue: Number(totalRevenue.toFixed(2)),
-      totalOrders: orders.length,
-      totalDiscount: Number(totalDiscount.toFixed(2)),
-      totalTax: Number(totalTax.toFixed(2)),
-      averageOrderValue: Number(averageOrderValue.toFixed(2)),
-      byPaymentMethod: Object.entries(byPaymentMethod).map(([method, data]) => ({
-        method,
-        count: data.count,
-        total: Number(data.total.toFixed(2)),
-      })),
-      byOrderType: Object.entries(byOrderType).map(([type, data]) => ({
-        type,
-        count: data.count,
-        total: Number(data.total.toFixed(2)),
-      })),
-    });
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+  const rows = db.prepare(sql).all(...params);
+  res.json(rows);
 });
 
-router.get("/reports/products", async (req, res) => {
-  try {
-    const { from, to } = req.query;
-    let items = await db.select().from(orderItemsTable);
-    const products = await db.select({ product: productsTable, categoryName: categoriesTable.nameAr })
-      .from(productsTable).leftJoin(categoriesTable, eq(productsTable.categoryId, categoriesTable.id));
+router.get("/reports/by-cashier", (req, res) => {
+  const { startDate, endDate } = req.query;
+  let sql = `
+    SELECT u.id as userId, u.name as userName,
+           COUNT(o.id) as orders,
+           COALESCE(SUM(o.total), 0) as total,
+           COALESCE(SUM(o.subtotal), 0) as subtotal,
+           COALESCE(SUM(o.discount), 0) as discount,
+           COALESCE(SUM(o.tax), 0) as tax
+    FROM orders o
+    JOIN users u ON u.id = o.user_id
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+  if (startDate) { sql += " AND DATE(o.created_at)>=?"; params.push(startDate); }
+  if (endDate) { sql += " AND DATE(o.created_at)<=?"; params.push(endDate); }
+  sql += " GROUP BY u.id, u.name ORDER BY total DESC";
 
-    const grouped: Record<number, { totalSold: number; totalRevenue: number; prices: number[] }> = {};
-    for (const item of items) {
-      if (!grouped[item.productId]) grouped[item.productId] = { totalSold: 0, totalRevenue: 0, prices: [] };
-      grouped[item.productId].totalSold += item.quantity;
-      grouped[item.productId].totalRevenue += Number(item.totalPrice);
-      grouped[item.productId].prices.push(Number(item.unitPrice));
-    }
+  const rows = db.prepare(sql).all(...params);
+  res.json(rows);
+});
 
-    const result = Object.entries(grouped)
-      .map(([pid, data]) => {
-        const found = products.find((p) => p.product.id === Number(pid));
-        if (!found) return null;
-        return {
-          id: found.product.id,
-          name: found.product.name,
-          nameAr: found.product.nameAr,
-          categoryName: found.categoryName ?? "",
-          totalSold: data.totalSold,
-          totalRevenue: Number(data.totalRevenue.toFixed(2)),
-          averagePrice: Number((data.prices.reduce((a, b) => a + b, 0) / data.prices.length).toFixed(2)),
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => b!.totalRevenue - a!.totalRevenue);
+router.get("/reports/by-product", (req, res) => {
+  const { startDate, endDate, limit = "20" } = req.query;
+  let sql = `
+    SELECT oi.product_id as productId, oi.product_name as productName,
+           oi.category_name as categoryName,
+           SUM(oi.quantity) as totalQty,
+           COALESCE(SUM(oi.total), 0) as totalRevenue,
+           COALESCE(SUM((oi.unit_price - COALESCE(p.cost, 0)) * oi.quantity), 0) as totalProfit,
+           COUNT(DISTINCT oi.order_id) as orderCount
+    FROM order_items oi
+    JOIN orders o ON o.id = oi.order_id
+    LEFT JOIN products p ON p.id = oi.product_id
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+  if (startDate) { sql += " AND DATE(o.created_at)>=?"; params.push(startDate); }
+  if (endDate) { sql += " AND DATE(o.created_at)<=?"; params.push(endDate); }
+  sql += " GROUP BY oi.product_id, oi.product_name, oi.category_name ORDER BY totalQty DESC LIMIT ?";
+  params.push(Number(limit) || 20);
 
-    res.json(result);
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+  const rows = db.prepare(sql).all(...params);
+  res.json(rows);
+});
+
+router.get("/reports/by-category", (req, res) => {
+  const { startDate, endDate } = req.query;
+  let sql = `
+    SELECT oi.category_id as categoryId,
+           COALESCE(oi.category_name, 'غير مصنّف') as categoryName,
+           SUM(oi.quantity) as totalQty,
+           COALESCE(SUM(oi.total), 0) as totalRevenue,
+           COUNT(DISTINCT oi.order_id) as orderCount
+    FROM order_items oi
+    JOIN orders o ON o.id = oi.order_id
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+  if (startDate) { sql += " AND DATE(o.created_at)>=?"; params.push(startDate); }
+  if (endDate) { sql += " AND DATE(o.created_at)<=?"; params.push(endDate); }
+  sql += " GROUP BY oi.category_id, oi.category_name ORDER BY totalRevenue DESC";
+
+  const rows = db.prepare(sql).all(...params);
+  res.json(rows);
+});
+
+router.get("/reports/by-payment", (req, res) => {
+  const { startDate, endDate } = req.query;
+  let sql = `
+    SELECT payment_method as paymentMethod,
+           COUNT(*) as orders,
+           COALESCE(SUM(total), 0) as total
+    FROM orders WHERE 1=1
+  `;
+  const params: any[] = [];
+  if (startDate) { sql += " AND DATE(created_at)>=?"; params.push(startDate); }
+  if (endDate) { sql += " AND DATE(created_at)<=?"; params.push(endDate); }
+  sql += " GROUP BY payment_method ORDER BY total DESC";
+
+  const rows = db.prepare(sql).all(...params);
+  res.json(rows);
 });
 
 export default router;
