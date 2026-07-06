@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, Plus, Minus, Printer, ShoppingCart, X } from "lucide-react";
+import { Trash2, Plus, Minus, Printer, ShoppingCart, X, UtensilsCrossed } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReceiptPreview, MasterReceiptSlip, DeptReceiptSlip } from "@/components/receipt";
 
@@ -133,6 +133,13 @@ export default function Pos() {
   const [showReprintDialog, setShowReprintDialog] = useState(false);
   const [activePrintPage, setActivePrintPage] = useState<PrintPage | null>(null);
   const numberInputRef = useRef<HTMLInputElement>(null);
+
+  // ── وجبات الموظفين ──
+  const [mealMode, setMealMode] = useState(false);
+  const [empNumInput, setEmpNumInput] = useState("");
+  const [foundEmployee, setFoundEmployee] = useState<any>(null);
+  const [showMealConfirm, setShowMealConfirm] = useState(false);
+  const [lookingUpEmp, setLookingUpEmp] = useState(false);
 
   const taxRate = settings?.taxRate ?? 15;
   const currency = settings?.currency ?? "ريال";
@@ -398,6 +405,82 @@ export default function Pos() {
     }
   };
 
+  // ── بحث عن موظف برقمه ──
+  const lookupEmployee = async () => {
+    if (!empNumInput.trim()) return;
+    setLookingUpEmp(true);
+    try {
+      const token = localStorage.getItem("pos_token") ?? "";
+      const resp = await fetch(`/api/hr/employees/by-number/${encodeURIComponent(empNumInput.trim())}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const emp = await resp.json();
+      setFoundEmployee(emp);
+      setShowMealConfirm(true);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "لم يتم العثور على الموظف", description: "تحقق من رقم الموظف" });
+    } finally {
+      setLookingUpEmp(false);
+    }
+  };
+
+  // ── تأكيد تسجيل الوجبة ──
+  const confirmMealDeduction = () => {
+    if (!foundEmployee || cart.length === 0) return;
+    const mealNote = `وجبة موظف: ${foundEmployee.name} (${foundEmployee.employee_number})`;
+
+    const items: OrderItemInput[] = cart.map(i => ({
+      productId: i.product.id,
+      quantity: i.quantity,
+      unitPrice: i.product.price,
+    }));
+
+    createOrderMutation.mutate({
+      data: {
+        items,
+        paymentMethod: "cash",
+        subtotal,
+        discount: discountAmt,
+        tax: taxAmt,
+        total,
+        cashAmount: total,
+        cardAmount: null,
+        userId: user!.id,
+        orderType: "takeout",
+        tableNumber: null,
+        note: mealNote,
+      }
+    }, {
+      onSuccess: async (order) => {
+        // تسجيل خصم الوجبة في سجل الموظف
+        const token = localStorage.getItem("pos_token") ?? "";
+        await fetch("/api/hr/meal-deductions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            employee_id: foundEmployee.id,
+            employee_name: foundEmployee.name,
+            employee_number: foundEmployee.employee_number,
+            order_id: order.id,
+            invoice_number: order.invoiceNumber,
+            amount: total,
+            notes: `${cart.map(i => i.product.name).join(", ")}`,
+          }),
+        });
+        toast({ title: "✅ تم تسجيل وجبة الموظف", description: `${foundEmployee.name} — ${order.invoiceNumber}` });
+        setLastOrder(order);
+        setShowMealConfirm(false);
+        setCart([]);
+        setDiscount(0);
+        setEmpNumInput("");
+        setFoundEmployee(null);
+        setShowReceipt(true);
+      },
+      onError: () => { toast({ variant: "destructive", title: "فشل في تسجيل الوجبة" }); },
+    });
+  };
+
   const confirmPay = () => {
     const items: OrderItemInput[] = cart.map(i => ({
       productId: i.product.id,
@@ -639,23 +722,64 @@ export default function Pos() {
         {/* ═══ MAIN: Products panel ═══ */}
         <div className="flex-1 flex flex-col overflow-hidden">
 
-          {/* ── Top bar: number input ── */}
-          <div className="h-10 bg-[#0f1e3c] border-b border-slate-700 flex items-center gap-3 px-3 shrink-0">
-            <span className="text-white/60 text-xs font-medium shrink-0">رقم الصنف:</span>
-            <Input
-              ref={numberInputRef}
-              type="number"
-              placeholder="اكتب الرقم + Enter"
-              value={numberInput}
-              onChange={e => setNumberInput(e.target.value)}
-              onKeyDown={handleNumberInput}
-              className="w-40 h-7 text-sm text-center font-bold bg-white/10 border-white/20 text-white placeholder:text-white/40 focus:bg-white focus:text-slate-900"
-              dir="ltr"
-            />
-            {cart.length > 0 && (
-              <span className="text-amber-300 text-xs font-bold mr-auto">
-                {cart.length} صنف — {total.toFixed(0)} {currency}
-              </span>
+          {/* ── Top bar: number input + meal mode ── */}
+          <div className="bg-[#0f1e3c] border-b border-slate-700 flex items-center gap-3 px-3 py-1.5 shrink-0 flex-wrap">
+            {!mealMode ? (
+              <>
+                <span className="text-white/60 text-xs font-medium shrink-0">رقم الصنف:</span>
+                <Input
+                  ref={numberInputRef}
+                  type="number"
+                  placeholder="اكتب الرقم + Enter"
+                  value={numberInput}
+                  onChange={e => setNumberInput(e.target.value)}
+                  onKeyDown={handleNumberInput}
+                  className="w-40 h-7 text-sm text-center font-bold bg-white/10 border-white/20 text-white placeholder:text-white/40 focus:bg-white focus:text-slate-900"
+                  dir="ltr"
+                />
+                {cart.length > 0 && (
+                  <span className="text-amber-300 text-xs font-bold">
+                    {cart.length} صنف — {total.toFixed(0)} {currency}
+                  </span>
+                )}
+                <button
+                  onClick={() => setMealMode(true)}
+                  className="mr-auto flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-amber-300 border border-amber-400/30 rounded hover:bg-amber-400/10 transition-colors"
+                  title="وضع وجبات الموظفين"
+                >
+                  <UtensilsCrossed className="w-3.5 h-3.5" />وجبة موظف
+                </button>
+              </>
+            ) : (
+              <>
+                <UtensilsCrossed className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="text-amber-400 text-xs font-bold shrink-0">وجبة موظف:</span>
+                <Input
+                  type="text"
+                  placeholder="أدخل رقم الموظف + Enter"
+                  value={empNumInput}
+                  onChange={e => setEmpNumInput(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && lookupEmployee()}
+                  className="w-44 h-7 text-sm text-center font-bold bg-amber-400/10 border-amber-400/40 text-amber-100 placeholder:text-amber-400/50 focus:bg-white focus:text-slate-900"
+                  dir="ltr"
+                  autoFocus
+                />
+                <Button
+                  size="sm"
+                  onClick={lookupEmployee}
+                  disabled={lookingUpEmp || !empNumInput.trim() || cart.length === 0}
+                  className="h-7 text-xs bg-amber-500 hover:bg-amber-600 text-white border-0"
+                >
+                  {lookingUpEmp ? "جاري البحث..." : "تأكيد الوجبة"}
+                </Button>
+                {cart.length === 0 && <span className="text-amber-400/70 text-xs">أضف أصناف أولاً</span>}
+                <button
+                  onClick={() => { setMealMode(false); setEmpNumInput(""); }}
+                  className="mr-auto text-white/50 hover:text-white text-xs transition-colors"
+                >
+                  ✕ إلغاء وضع الوجبات
+                </button>
+              </>
             )}
           </div>
 
@@ -782,6 +906,51 @@ export default function Pos() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Meal Deduction Confirm Dialog */}
+      <Dialog open={showMealConfirm} onOpenChange={v => { if (!v) { setShowMealConfirm(false); setFoundEmployee(null); } }}>
+        <DialogContent dir="rtl" className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UtensilsCrossed className="w-5 h-5 text-amber-600" />تأكيد وجبة الموظف
+            </DialogTitle>
+          </DialogHeader>
+          {foundEmployee && (
+            <div className="space-y-3">
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <div className="font-bold text-sm">{foundEmployee.name}</div>
+                <div className="text-xs text-muted-foreground">رقم الموظف: {foundEmployee.employee_number}</div>
+                {foundEmployee.department_name && <div className="text-xs text-muted-foreground">القسم: {foundEmployee.department_name}</div>}
+                {foundEmployee.meal_deductions_this_month > 0 && (
+                  <div className="text-xs text-amber-700 mt-1">
+                    خصم وجبات الشهر الحالي: {Number(foundEmployee.meal_deductions_this_month).toLocaleString("ar-SA", { minimumFractionDigits: 2 })}
+                  </div>
+                )}
+              </div>
+              <div className="bg-muted rounded-lg p-3 space-y-1">
+                <div className="text-xs font-semibold text-muted-foreground">الأصناف:</div>
+                {cart.map(i => (
+                  <div key={i.product.id} className="flex justify-between text-xs">
+                    <span>{i.product.name} × {i.quantity}</span>
+                    <span className="font-mono">{(i.product.price * i.quantity).toLocaleString()}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between font-bold text-sm border-t pt-1 mt-1">
+                  <span>إجمالي الخصم:</span>
+                  <span className="text-destructive font-mono">{total.toFixed(2)} {currency}</span>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">سيُخصَم هذا المبلغ من راتب الموظف عند صرف الراتب.</p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowMealConfirm(false); setFoundEmployee(null); }}>إلغاء</Button>
+            <Button onClick={confirmMealDeduction} disabled={createOrderMutation.isPending} className="bg-amber-600 hover:bg-amber-700">
+              <UtensilsCrossed className="w-4 h-4 me-2" />تأكيد الوجبة
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

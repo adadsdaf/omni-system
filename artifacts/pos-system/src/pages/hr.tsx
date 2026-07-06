@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Pencil, Trash2, Users, DollarSign, Building2, CalendarCheck } from "lucide-react";
+import { Plus, Pencil, Trash2, Users, DollarSign, Building2, CalendarCheck, UtensilsCrossed } from "lucide-react";
+import { PayrollPrintButton } from "@/components/payroll-print";
 
 function fetchAuth(url: string, opts: RequestInit = {}) {
   const token = localStorage.getItem("pos_token") ?? "";
@@ -303,6 +304,7 @@ function SalariesTab() {
                   <td className="p-3">
                     <div className="flex gap-1 justify-end flex-wrap">
                       {s.status !== "paid" && <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => payMut.mutate(s)}>صرف</Button>}
+                      <PayrollPrintButton employeeId={s.employee_id} month={s.month} employeeName={s.employee_name} />
                       <Button variant="ghost" size="icon" onClick={() => openEdit(s)}><Pencil className="w-3 h-3" /></Button>
                       <Button variant="ghost" size="icon" className="text-destructive" onClick={() => confirm("حذف السجل؟") && delMut.mutate(s.id)}><Trash2 className="w-3 h-3" /></Button>
                     </div>
@@ -468,6 +470,98 @@ function AttendanceTab() {
   );
 }
 
+/* ─── تبويب خصم وجبات الموظفين ─── */
+function MealDeductionsTab() {
+  const { toast } = useToast();
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const [filterMonth, setFilterMonth] = useState(currentMonth);
+  const [filterEmp, setFilterEmp] = useState("");
+  const { data: employees = [] } = useQuery({ queryKey: ["hr-employees"], queryFn: () => apiGet("/api/hr/employees") });
+  const { data: deductions = [], isLoading } = useQuery({
+    queryKey: ["hr-meal-deductions", filterMonth, filterEmp],
+    queryFn: () => {
+      const params = new URLSearchParams({ month: filterMonth });
+      if (filterEmp) params.set("employee_id", filterEmp);
+      return apiGet(`/api/hr/meal-deductions?${params}`);
+    },
+  });
+
+  const totalDeductions = (deductions as any[]).reduce((s, d) => s + d.amount, 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div>
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <UtensilsCrossed className="w-5 h-5 text-amber-600" />خصم وجبات الموظفين
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            إجمالي الخصومات: <span className="font-bold text-destructive">{Number(totalDeductions).toLocaleString("ar-SA", { minimumFractionDigits: 2 })}</span>
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Select value={filterEmp} onValueChange={setFilterEmp}>
+            <SelectTrigger className="w-44"><SelectValue placeholder="كل الموظفين" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">كل الموظفين</SelectItem>
+              {(employees as any[]).filter((e: any) => e.active).map((e: any) => (
+                <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="w-40" />
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="text-center py-8 text-muted-foreground">جاري التحميل...</div>
+      ) : (
+        <div className="bg-card rounded-xl border border-border overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 border-b border-border">
+              <tr>
+                <th className="text-right p-3 font-semibold">الموظف</th>
+                <th className="text-right p-3 font-semibold">رقم الموظف</th>
+                <th className="text-right p-3 font-semibold">الكاشير</th>
+                <th className="text-right p-3 font-semibold">التاريخ</th>
+                <th className="text-right p-3 font-semibold">رقم الفاتورة</th>
+                <th className="text-right p-3 font-semibold">ملاحظات</th>
+                <th className="text-right p-3 font-semibold">المبلغ</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {(deductions as any[]).map((d: any) => (
+                <tr key={d.id} className="hover:bg-muted/30">
+                  <td className="p-3 font-medium">{d.employee_name}</td>
+                  <td className="p-3 font-mono text-xs text-muted-foreground">{d.employee_number}</td>
+                  <td className="p-3 text-muted-foreground">{d.cashier_name}</td>
+                  <td className="p-3 text-muted-foreground">{new Date(d.created_at).toLocaleDateString("ar-SA")}</td>
+                  <td className="p-3 font-mono text-xs">{d.invoice_number ?? "—"}</td>
+                  <td className="p-3 text-xs text-muted-foreground">{d.notes ?? "—"}</td>
+                  <td className="p-3 font-mono font-bold text-destructive">{Number(d.amount).toLocaleString("ar-SA", { minimumFractionDigits: 2 })}</td>
+                </tr>
+              ))}
+              {(deductions as any[]).length === 0 && (
+                <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">لا توجد خصومات وجبات لهذا الشهر</td></tr>
+              )}
+            </tbody>
+            {(deductions as any[]).length > 0 && (
+              <tfoot className="border-t border-border bg-muted/30">
+                <tr>
+                  <td colSpan={6} className="p-3 font-bold text-right">الإجمالي</td>
+                  <td className="p-3 font-bold text-destructive font-mono">
+                    {Number(totalDeductions).toLocaleString("ar-SA", { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Main HR Page ─── */
 export default function HR() {
   const { data: summary } = useQuery({ queryKey: ["hr-summary"], queryFn: () => apiGet("/api/hr/summary") });
@@ -500,16 +594,18 @@ export default function HR() {
         </div>
 
         <Tabs defaultValue="employees" dir="rtl">
-          <TabsList className="grid grid-cols-4 w-full max-w-lg">
+          <TabsList className="grid grid-cols-5 w-full max-w-2xl">
             <TabsTrigger value="employees">الموظفون</TabsTrigger>
             <TabsTrigger value="departments">الأقسام</TabsTrigger>
             <TabsTrigger value="salaries">الرواتب</TabsTrigger>
             <TabsTrigger value="attendance">الحضور</TabsTrigger>
+            <TabsTrigger value="meals">وجبات الموظفين</TabsTrigger>
           </TabsList>
           <TabsContent value="employees" className="mt-4"><EmployeesTab /></TabsContent>
           <TabsContent value="departments" className="mt-4"><DepartmentsTab /></TabsContent>
           <TabsContent value="salaries" className="mt-4"><SalariesTab /></TabsContent>
           <TabsContent value="attendance" className="mt-4"><AttendanceTab /></TabsContent>
+          <TabsContent value="meals" className="mt-4"><MealDeductionsTab /></TabsContent>
         </Tabs>
       </div>
     </AdminLayout>

@@ -361,6 +361,7 @@
 .receipt-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 11px;
 }
 
@@ -376,20 +377,22 @@
   text-align: right;
   padding: 2px 0;
   font-weight: bold;
+  width: 55%;
+  overflow: hidden;
 }
 
 .receipt-th-qty {
   text-align: center;
-  padding: 2px 0;
+  padding: 2px 2px;
   font-weight: bold;
-  width: 30px;
+  width: 15%;
 }
 
 .receipt-th-price {
   text-align: left;
-  padding: 2px 4px;
+  padding: 2px 2px;
   font-weight: bold;
-  width: 60px;
+  width: 30%;
   direction: ltr;
   unicode-bidi: embed;
 }
@@ -397,22 +400,28 @@
 .receipt-td-item {
   text-align: right;
   padding: 2px 0;
+  width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 0;
 }
 
 .receipt-td-qty {
   text-align: center;
-  padding: 2px 4px;
-  width: 34px;
+  padding: 2px 2px;
+  width: 15%;
 }
 
 .receipt-td-price {
   text-align: left;
-  padding: 2px 4px;
-  width: 60px;
+  padding: 2px 2px;
+  width: 30%;
   font-variant-numeric: tabular-nums;
   direction: ltr;
   unicode-bidi: embed;
   white-space: nowrap;
+  overflow: hidden;
 }
 
 .receipt-table-dept .receipt-td-qty-big {
