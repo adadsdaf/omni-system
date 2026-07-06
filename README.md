@@ -1,49 +1,20 @@
-# OmniSystem POS - ملخص التعديلات
-التاريخ: 2026-07-02
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
+</div>
 
-## الملفات المعدلة
+# Run and deploy your AI Studio app
 
-### 1. اصلاح تجاوز النص في الفواتير (index.css)
-- الملف: src/pos-system/index.css
-- المشكلة: اسماء المنتجات الطويلة كانت تتجاوز حدود خانة الصنف في الفواتير المطبوعة.
-- الحل:
-  - اضافة table-layout: fixed لجدولي .receipt-table و .dept-slip-table
-  - اضافة overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0
-    لخانتي .receipt-td-item و .dept-slip-item-name
-  - يضمن ذلك احترام عرض الاعمدة وعدم تجاوز النص حدوده
+This contains everything you need to run your app locally.
 
-### 2. نظام الموارد البشرية - بحث + كشف راتب (hr.tsx)
-- الملف: src/pos-system/pages/hr.tsx
-- الميزات المضافة:
-  أ) بحث عن الموظفين
-     - حقل بحث في تبويب الموظفون يعمل لحظياً
-     - البحث يشمل: اسم الموظف، رقم الموظف، المنصب الوظيفي، اسم القسم
-  ب) طباعة كشف الراتب
-     - زر طباعة بجانب كل سجل راتب في تبويب الرواتب
-     - نافذة طباعة بتنسيق A4 احترافي تحتوي على:
-       * شعار المؤسسة (مركزي) مع اسم المؤسسة
-       * معلومات التواصل (العنوان يسار، الهاتف يمين)
-       * بيانات الموظف (رقم الموظف، الشهر، الحالة)
-       * جدول مفصل للراتب: الاساسي، البدلات (+)، الخصومات (-، صافي الراتب
-       * مساحات توقيع: المدير، المحاسب، الموظف
+View your app in AI Studio: https://ai.studio/apps/e922522d-7513-4d5f-805b-7490626971ab
 
-### 3. نظام المرتجعات - البحث برقم الفاتورة (returns.tsx + orders.ts)
-- الملفات: src/pos-system/pages/returns.tsx + src/api-server/routes/orders.ts
+## Run Locally
 
-  أ) Endpoint جديد في الباك-اند:
-     GET /api/orders/by-invoice/:invoiceNumber
-     - يجلب الطلب الاصلي وعناصره كاملة حسب رقم الفاتورة
+**Prerequisites:**  Node.js
 
-  ب) واجهة البحث في نافذة مرتجع جديد:
-     - حقل بحث برقم الفاتورة مع زر بحث
-     - عند العثور على الفاتورة: يظهر ملخص (رقم الفاتورة، التاريخ، الاجمالي، الكاشير)
-     - يتم استيراد المنتجات تلقائياً من الفاتورة الاصلية
-     - الارجاع الجزئي: تعديل كمية كل منتج مع عرض الحد الاقصى من الفاتورة الاصلية
-     - الارجاع الكامل: الكميات تملا تلقائياً كاملة - يمكن التاكيد مباشرة
-     - لا يزال بالامكان ادخال رقم الفاتورة يدوياً (الطريقة القديمة)
 
-## ملاحظات تقنية
-- بسبب table-layout: fixed يجب ان تحدد اعمدة السعر والكمية عرضاً ثابتاً
-  (وهو موجود مسبقاً في CSS: 60px و 34px) حتى يعمل الاقتطاع بشكل صحيح.
-- كشف الراتب يجلب اعدادات المطعم (الشعار، الاسم، العنوان، الهاتف) من /api/settings
-- جميع التغييرات لا تتطلب تغييرات في قاعدة البيانات.
+1. Install dependencies:
+   `npm install`
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+3. Run the app:
+   `npm run dev`

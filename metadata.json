@@ -1,0 +1,6 @@
+{
+  "name": "Electron POS Packager",
+  "description": "An interactive utility to generate, preview, and configure Electron packaging with splash screens and background server checking for POS systems.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
