@@ -120,4 +120,108 @@ router.get("/returns-summary", (req, res) => {
   });
 });
 
+/* ── البحث عن طلب بواسطة رقم الفاتورة أو ID ── */
+router.get("/orders/lookup", (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) return;
+  const { q } = req.query as any;
+  if (!q) { res.status(400).json({ error: "مطلوب معيار البحث" }); return; }
+
+  // البحث بالرقم التسلسلي أو بـ INV-XXXX
+  const searchNum = String(q).trim();
+  let orderRow = db.prepare(`
+    SELECT o.*, u.name as user_name, c.name as customer_name
+    FROM orders o
+    LEFT JOIN users u ON u.id=o.user_id
+    LEFT JOIN customers c ON c.id=o.customer_id
+    WHERE o.invoice_number=? OR o.invoice_number=? OR CAST(o.id AS TEXT)=?
+  `).get(searchNum, `INV-${searchNum.padStart(4,"0")}`, searchNum) as any;
+
+  if (!orderRow) { res.status(404).json({ error: "لم يتم العثور على الفاتورة" }); return; }
+  const items = db.prepare("SELECT * FROM order_items WHERE order_id=?").all(orderRow.id) as any[];
+
+  // هل تم إرجاع هذه الفاتورة مسبقاً؟
+  const existingReturn = db.prepare("SELECT id, return_number, total_refund FROM returns WHERE order_id=? OR invoice_number=?")
+    .get(orderRow.id, orderRow.invoice_number) as any;
+
+  res.json({
+    id: orderRow.id,
+    invoiceNumber: orderRow.invoice_number,
+    total: orderRow.total,
+    subtotal: orderRow.subtotal,
+    discount: orderRow.discount,
+    tax: orderRow.tax,
+    paymentMethod: orderRow.payment_method,
+    orderType: orderRow.order_type,
+    tableNumber: orderRow.table_number,
+    note: orderRow.note,
+    createdAt: orderRow.created_at,
+    cashierName: orderRow.user_name,
+    userId: orderRow.user_id,
+    customerName: orderRow.customer_name,
+    alreadyReturned: !!existingReturn,
+    existingReturn: existingReturn ?? null,
+    items: items.map(i => ({
+      id: i.id,
+      productId: i.product_id,
+      productName: i.product_name,
+      quantity: i.quantity,
+      unitPrice: i.unit_price,
+      total: i.total,
+      categoryId: i.category_id,
+      categoryName: i.category_name,
+    })),
+  });
+});
+
+/* ── ملخص صناديق الكاشيرين ── */
+router.get("/cashier-boxes", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { date } = req.query as any;
+  const filterDate = date ?? new Date().toISOString().slice(0, 10);
+
+  const cashiers = db.prepare(`
+    SELECT u.id, u.name,
+      COALESCE(SUM(o.total),0) as orders_total,
+      COUNT(o.id) as orders_count
+    FROM users u
+    LEFT JOIN orders o ON o.user_id=u.id AND DATE(o.created_at)=?
+    WHERE u.active=1
+    GROUP BY u.id, u.name
+    ORDER BY u.name
+  `).all(filterDate) as any[];
+
+  const returns_ = db.prepare(`
+    SELECT o.user_id,
+      COALESCE(SUM(r.total_refund),0) as returns_total,
+      COUNT(r.id) as returns_count
+    FROM returns r
+    LEFT JOIN orders o ON o.id=r.order_id
+    WHERE DATE(r.created_at)=?
+    GROUP BY o.user_id
+  `).all(filterDate) as any[];
+
+  const returnsMap = new Map(returns_.map(r => [r.user_id, r]));
+
+  const mainTotal = cashiers.reduce((s, c) => s + c.orders_total, 0);
+  const mainReturns = returns_.reduce((s, r) => s + r.returns_total, 0);
+
+  res.json({
+    date: filterDate,
+    mainBox: { total: mainTotal, returnsTotal: mainReturns, net: mainTotal - mainReturns },
+    cashiers: cashiers.map(c => {
+      const ret = returnsMap.get(c.id);
+      return {
+        userId: c.id,
+        name: c.name,
+        ordersTotal: c.orders_total,
+        ordersCount: c.orders_count,
+        returnsTotal: ret?.returns_total ?? 0,
+        returnsCount: ret?.returns_count ?? 0,
+        net: c.orders_total - (ret?.returns_total ?? 0),
+      };
+    }),
+  });
+});
+
 export default router;

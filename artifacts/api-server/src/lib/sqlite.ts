@@ -226,6 +226,20 @@ function initSchema() {
       unit_price REAL NOT NULL,
       total REAL NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS meal_deductions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id INTEGER NOT NULL REFERENCES hr_employees(id),
+      employee_name TEXT NOT NULL,
+      employee_number TEXT NOT NULL,
+      order_id INTEGER REFERENCES orders(id),
+      invoice_number TEXT,
+      amount REAL NOT NULL DEFAULT 0,
+      cashier_id INTEGER NOT NULL REFERENCES users(id),
+      cashier_name TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 }
 
@@ -236,6 +250,9 @@ function runMigrations() {
   try { db.exec("ALTER TABLE orders ADD COLUMN order_type TEXT NOT NULL DEFAULT 'dine-in'"); } catch {}
   try { db.exec("ALTER TABLE orders ADD COLUMN table_number TEXT"); } catch {}
   try { db.exec("ALTER TABLE printer_settings ADD COLUMN main_printer_name TEXT"); } catch {}
+  try { db.exec("ALTER TABLE users ADD COLUMN allow_meal_deduction INTEGER NOT NULL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE orders ADD COLUMN is_employee_meal INTEGER NOT NULL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE orders ADD COLUMN employee_id INTEGER"); } catch {}
   // printer_settings default row
   try {
     db.exec(`INSERT OR IGNORE INTO printer_settings (id, paper_width, left_margin, right_margin, top_margin, bottom_margin, font_size, line_spacing, characters_per_line)

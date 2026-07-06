@@ -204,6 +204,81 @@ router.delete("/hr/attendance/:id", (req, res) => {
   res.status(204).send();
 });
 
+/* ── Meal Deductions ── */
+router.get("/hr/meal-deductions", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { employee_id, month } = req.query as any;
+  let sql = `SELECT md.*, e.name as employee_name, e.employee_number FROM meal_deductions md
+    JOIN hr_employees e ON e.id=md.employee_id WHERE 1=1`;
+  const params: any[] = [];
+  if (employee_id) { sql += " AND md.employee_id=?"; params.push(employee_id); }
+  if (month) { sql += " AND strftime('%Y-%m', md.created_at)=?"; params.push(month); }
+  sql += " ORDER BY md.created_at DESC";
+  res.json(db.prepare(sql).all(...params));
+});
+
+router.post("/hr/meal-deductions", (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) { res.status(401).json({ error: "غير مصرح" }); return; }
+  const { employee_id, employee_name, employee_number, order_id, invoice_number, amount, notes } = req.body;
+  if (!employee_id || !amount) { res.status(400).json({ error: "الموظف والمبلغ مطلوبان" }); return; }
+  const r = db.prepare(`
+    INSERT INTO meal_deductions (employee_id, employee_name, employee_number, order_id, invoice_number, amount, cashier_id, cashier_name, notes)
+    VALUES (?,?,?,?,?,?,?,?,?)
+  `).run(employee_id, employee_name ?? "", employee_number ?? "", order_id ?? null, invoice_number ?? null, amount, user.id, user.name, notes ?? null);
+  res.status(201).json(db.prepare("SELECT * FROM meal_deductions WHERE id=?").get(r.lastInsertRowid));
+});
+
+/* ── Employee lookup by number (for POS meal deduction) ── */
+router.get("/hr/employees/by-number/:num", (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) { res.status(401).json({ error: "غير مصرح" }); return; }
+  const emp = db.prepare(`
+    SELECT e.*, d.name as department_name,
+      (SELECT COALESCE(SUM(md.amount),0) FROM meal_deductions md WHERE md.employee_id=e.id AND strftime('%Y-%m', md.created_at)=strftime('%Y-%m','now')) as meal_deductions_this_month
+    FROM hr_employees e LEFT JOIN hr_departments d ON d.id=e.department_id
+    WHERE e.employee_number=? AND e.active=1
+  `).get(req.params.num) as any;
+  if (!emp) { res.status(404).json({ error: "الموظف غير موجود أو غير نشط" }); return; }
+  res.json({ ...emp, active: Boolean(emp.active) });
+});
+
+/* ── Salary Statement Data (for A4 print) ── */
+router.get("/hr/salary-statement/:employee_id/:month", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { employee_id, month } = req.params;
+  const emp = db.prepare(`
+    SELECT e.*, d.name as department_name FROM hr_employees e
+    LEFT JOIN hr_departments d ON d.id=e.department_id WHERE e.id=?
+  `).get(employee_id) as any;
+  if (!emp) { res.status(404).json({ error: "الموظف غير موجود" }); return; }
+
+  const salary = db.prepare("SELECT * FROM hr_salaries WHERE employee_id=? AND month=?").get(employee_id, month) as any;
+  const mealDeductions = db.prepare(`
+    SELECT * FROM meal_deductions WHERE employee_id=? AND strftime('%Y-%m', created_at)=?
+    ORDER BY created_at ASC
+  `).all(employee_id, month) as any[];
+  const mealTotal = mealDeductions.reduce((s: number, m: any) => s + m.amount, 0);
+  const attendance = db.prepare(`
+    SELECT status, COUNT(*) as count FROM hr_attendance
+    WHERE employee_id=? AND strftime('%Y-%m', date)=?
+    GROUP BY status
+  `).all(employee_id, month) as any[];
+
+  const businessSettings = db.prepare("SELECT key, value FROM settings").all() as any[];
+  const settings: Record<string,string> = {};
+  businessSettings.forEach((s: any) => { settings[s.key] = s.value; });
+
+  res.json({
+    employee: { ...emp, active: Boolean(emp.active) },
+    salary: salary ?? null,
+    mealDeductions,
+    mealTotal,
+    attendance,
+    settings,
+  });
+});
+
 /* ── Summary ── */
 router.get("/hr/summary", (req, res) => {
   if (!requireAdmin(req, res)) return;
