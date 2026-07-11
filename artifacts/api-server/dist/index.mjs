@@ -501,6 +501,121 @@ var require_browser = __commonJS({
   }
 });
 
+// ../../node_modules/.pnpm/has-flag@4.0.0/node_modules/has-flag/index.js
+var require_has_flag = __commonJS({
+  "../../node_modules/.pnpm/has-flag@4.0.0/node_modules/has-flag/index.js"(exports, module) {
+    "use strict";
+    module.exports = (flag, argv = process.argv) => {
+      const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
+      const position = argv.indexOf(prefix + flag);
+      const terminatorPosition = argv.indexOf("--");
+      return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
+    };
+  }
+});
+
+// ../../node_modules/.pnpm/supports-color@7.2.0/node_modules/supports-color/index.js
+var require_supports_color = __commonJS({
+  "../../node_modules/.pnpm/supports-color@7.2.0/node_modules/supports-color/index.js"(exports, module) {
+    "use strict";
+    var os = __require("os");
+    var tty = __require("tty");
+    var hasFlag = require_has_flag();
+    var { env } = process;
+    var forceColor;
+    if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false") || hasFlag("color=never")) {
+      forceColor = 0;
+    } else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) {
+      forceColor = 1;
+    }
+    if ("FORCE_COLOR" in env) {
+      if (env.FORCE_COLOR === "true") {
+        forceColor = 1;
+      } else if (env.FORCE_COLOR === "false") {
+        forceColor = 0;
+      } else {
+        forceColor = env.FORCE_COLOR.length === 0 ? 1 : Math.min(parseInt(env.FORCE_COLOR, 10), 3);
+      }
+    }
+    function translateLevel(level) {
+      if (level === 0) {
+        return false;
+      }
+      return {
+        level,
+        hasBasic: true,
+        has256: level >= 2,
+        has16m: level >= 3
+      };
+    }
+    function supportsColor(haveStream, streamIsTTY) {
+      if (forceColor === 0) {
+        return 0;
+      }
+      if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) {
+        return 3;
+      }
+      if (hasFlag("color=256")) {
+        return 2;
+      }
+      if (haveStream && !streamIsTTY && forceColor === void 0) {
+        return 0;
+      }
+      const min = forceColor || 0;
+      if (env.TERM === "dumb") {
+        return min;
+      }
+      if (process.platform === "win32") {
+        const osRelease = os.release().split(".");
+        if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) {
+          return Number(osRelease[2]) >= 14931 ? 3 : 2;
+        }
+        return 1;
+      }
+      if ("CI" in env) {
+        if (["TRAVIS", "CIRCLECI", "APPVEYOR", "GITLAB_CI", "GITHUB_ACTIONS", "BUILDKITE"].some((sign) => sign in env) || env.CI_NAME === "codeship") {
+          return 1;
+        }
+        return min;
+      }
+      if ("TEAMCITY_VERSION" in env) {
+        return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+      }
+      if (env.COLORTERM === "truecolor") {
+        return 3;
+      }
+      if ("TERM_PROGRAM" in env) {
+        const version = parseInt((env.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
+        switch (env.TERM_PROGRAM) {
+          case "iTerm.app":
+            return version >= 3 ? 3 : 2;
+          case "Apple_Terminal":
+            return 2;
+        }
+      }
+      if (/-256(color)?$/i.test(env.TERM)) {
+        return 2;
+      }
+      if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) {
+        return 1;
+      }
+      if ("COLORTERM" in env) {
+        return 1;
+      }
+      return min;
+    }
+    function getSupportLevel(stream) {
+      const level = supportsColor(stream, stream && stream.isTTY);
+      return translateLevel(level);
+    }
+    module.exports = {
+      supportsColor: getSupportLevel,
+      stdout: translateLevel(supportsColor(true, tty.isatty(1))),
+      stderr: translateLevel(supportsColor(true, tty.isatty(2)))
+    };
+  }
+});
+
 // ../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/node.js
 var require_node = __commonJS({
   "../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/node.js"(exports, module) {
@@ -519,7 +634,7 @@ var require_node = __commonJS({
     );
     exports.colors = [6, 2, 3, 4, 5, 1];
     try {
-      const supportsColor = __require("supports-color");
+      const supportsColor = require_supports_color();
       if (supportsColor && (supportsColor.stderr || supportsColor).level >= 2) {
         exports.colors = [
           20,
@@ -28137,7 +28252,7 @@ var require_pino = __commonJS({
     function pinoBundlerAbsolutePath(p) {
       try {
         const path3 = __require("path");
-        const outputDir = "C:\\Users\\DZ\\Downloads\\sysposit-main\\artifacts\\api-server\\dist";
+        const outputDir = "/home/runner/workspace/artifacts/api-server/dist";
         return path3.resolve(outputDir, p.replace(/^\.\//, ""));
       } catch (e) {
         const f = new Function("p", "return new URL(p, import.meta.url).pathname");
@@ -32502,274 +32617,602 @@ var coerce = {
 var HealthCheckResponse = objectType({
   "status": stringType()
 });
-var LoginBody = objectType({
-  "username": stringType(),
-  "password": stringType()
+var GetDashboardSummaryResponse = objectType({
+  "todaySales": numberType(),
+  "todayOrders": numberType(),
+  "totalCustomers": numberType(),
+  "totalProducts": numberType(),
+  "occupiedTables": numberType(),
+  "totalTables": numberType(),
+  "pendingOrders": numberType(),
+  "monthSales": numberType(),
+  "weekSales": numberType(),
+  "averageOrderValue": numberType()
 });
-var LoginResponse = objectType({
-  "token": stringType(),
-  "user": objectType({
-    "id": numberType(),
-    "username": stringType(),
-    "name": stringType(),
-    "role": enumType(["admin", "cashier"]),
-    "active": booleanType()
-  })
+var getSalesChartQueryPeriodDefault = `daily`;
+var GetSalesChartQueryParams = objectType({
+  "period": enumType(["daily", "weekly", "monthly", "yearly"]).default(getSalesChartQueryPeriodDefault)
 });
-var GetMeResponse = objectType({
+var GetSalesChartResponseItem = objectType({
+  "label": stringType(),
+  "value": numberType(),
+  "orders": numberType()
+});
+var GetSalesChartResponse = arrayType(GetSalesChartResponseItem);
+var getTopProductsQueryLimitDefault = 10;
+var GetTopProductsQueryParams = objectType({
+  "limit": coerce.number().default(getTopProductsQueryLimitDefault)
+});
+var GetTopProductsResponseItem = objectType({
   "id": numberType(),
-  "username": stringType(),
   "name": stringType(),
-  "role": enumType(["admin", "cashier"]),
-  "active": booleanType()
+  "totalSold": numberType(),
+  "totalRevenue": numberType(),
+  "categoryName": stringType()
 });
-var LogoutResponse = unknownType();
+var GetTopProductsResponse = arrayType(GetTopProductsResponseItem);
+var getRecentOrdersQueryLimitDefault = 10;
+var GetRecentOrdersQueryParams = objectType({
+  "limit": coerce.number().default(getRecentOrdersQueryLimitDefault)
+});
+var GetRecentOrdersResponseItem = objectType({
+  "id": numberType(),
+  "orderNumber": stringType(),
+  "type": enumType(["dine_in", "takeaway", "delivery"]),
+  "status": enumType(["pending", "confirmed", "preparing", "ready", "served", "paid", "cancelled"]),
+  "tableId": numberType().nullish(),
+  "tableName": stringType().nullish(),
+  "customerId": numberType().nullish(),
+  "customerName": stringType().nullish(),
+  "items": arrayType(objectType({
+    "id": numberType(),
+    "productId": numberType(),
+    "productName": stringType(),
+    "productNameAr": stringType(),
+    "quantity": numberType(),
+    "unitPrice": numberType(),
+    "totalPrice": numberType(),
+    "notes": stringType().nullish(),
+    "status": enumType(["pending", "preparing", "ready", "served"])
+  })),
+  "subtotal": numberType(),
+  "discount": numberType(),
+  "tax": numberType(),
+  "total": numberType(),
+  "paymentMethod": unionType([literalType("cash"), literalType("card"), literalType("transfer"), literalType("wallet"), literalType(null)]).nullish(),
+  "notes": stringType().nullish(),
+  "createdAt": stringType(),
+  "updatedAt": stringType()
+});
+var GetRecentOrdersResponse = arrayType(GetRecentOrdersResponseItem);
 var GetCategoriesResponseItem = objectType({
   "id": numberType(),
   "name": stringType(),
-  "color": stringType().nullish()
+  "nameAr": stringType(),
+  "description": stringType().nullish(),
+  "icon": stringType().nullish(),
+  "color": stringType().nullish(),
+  "sortOrder": numberType(),
+  "isActive": booleanType(),
+  "productCount": numberType(),
+  "createdAt": stringType()
 });
 var GetCategoriesResponse = arrayType(GetCategoriesResponseItem);
 var CreateCategoryBody = objectType({
   "name": stringType(),
-  "color": stringType().nullish()
+  "nameAr": stringType(),
+  "description": stringType().nullish(),
+  "icon": stringType().nullish(),
+  "color": stringType().nullish(),
+  "sortOrder": numberType().optional()
 });
 var CreateCategoryResponse = objectType({
   "id": numberType(),
   "name": stringType(),
-  "color": stringType().nullish()
+  "nameAr": stringType(),
+  "description": stringType().nullish(),
+  "icon": stringType().nullish(),
+  "color": stringType().nullish(),
+  "sortOrder": numberType(),
+  "isActive": booleanType(),
+  "productCount": numberType(),
+  "createdAt": stringType()
+});
+var GetCategoryParams = objectType({
+  "id": coerce.number()
+});
+var GetCategoryResponse = objectType({
+  "id": numberType(),
+  "name": stringType(),
+  "nameAr": stringType(),
+  "description": stringType().nullish(),
+  "icon": stringType().nullish(),
+  "color": stringType().nullish(),
+  "sortOrder": numberType(),
+  "isActive": booleanType(),
+  "productCount": numberType(),
+  "createdAt": stringType()
 });
 var UpdateCategoryParams = objectType({
   "id": coerce.number()
 });
 var UpdateCategoryBody = objectType({
-  "name": stringType(),
-  "color": stringType().nullish()
+  "name": stringType().optional(),
+  "nameAr": stringType().optional(),
+  "description": stringType().nullish(),
+  "icon": stringType().nullish(),
+  "color": stringType().nullish(),
+  "sortOrder": numberType().optional(),
+  "isActive": booleanType().optional()
 });
 var UpdateCategoryResponse = objectType({
   "id": numberType(),
   "name": stringType(),
-  "color": stringType().nullish()
+  "nameAr": stringType(),
+  "description": stringType().nullish(),
+  "icon": stringType().nullish(),
+  "color": stringType().nullish(),
+  "sortOrder": numberType(),
+  "isActive": booleanType(),
+  "productCount": numberType(),
+  "createdAt": stringType()
 });
 var DeleteCategoryParams = objectType({
   "id": coerce.number()
 });
 var DeleteCategoryResponse = voidType();
 var GetProductsQueryParams = objectType({
-  "categoryId": coerce.number().optional(),
-  "search": coerce.string().optional()
+  "categoryId": coerce.number().nullish(),
+  "search": coerce.string().nullish(),
+  "available": coerce.boolean().nullish()
 });
 var GetProductsResponseItem = objectType({
   "id": numberType(),
-  "number": numberType(),
   "name": stringType(),
+  "nameAr": stringType(),
+  "description": stringType().nullish(),
   "price": numberType(),
-  "cost": numberType().nullish(),
+  "costPrice": numberType().nullish(),
+  "categoryId": numberType(),
+  "categoryName": stringType(),
   "barcode": stringType().nullish(),
-  "categoryId": numberType().nullish(),
-  "categoryName": stringType().nullish(),
-  "active": booleanType(),
-  "stock": numberType().nullish()
+  "image": stringType().nullish(),
+  "isAvailable": booleanType(),
+  "preparationTime": numberType().nullish(),
+  "calories": numberType().nullish(),
+  "createdAt": stringType()
 });
 var GetProductsResponse = arrayType(GetProductsResponseItem);
 var CreateProductBody = objectType({
   "name": stringType(),
-  "number": numberType(),
+  "nameAr": stringType(),
+  "description": stringType().nullish(),
   "price": numberType(),
-  "cost": numberType().nullish(),
+  "costPrice": numberType().nullish(),
+  "categoryId": numberType(),
   "barcode": stringType().nullish(),
-  "categoryId": numberType().nullish(),
-  "active": booleanType().optional(),
-  "stock": numberType().nullish()
+  "image": stringType().nullish(),
+  "preparationTime": numberType().nullish(),
+  "calories": numberType().nullish()
 });
 var CreateProductResponse = objectType({
   "id": numberType(),
-  "number": numberType(),
   "name": stringType(),
+  "nameAr": stringType(),
+  "description": stringType().nullish(),
   "price": numberType(),
-  "cost": numberType().nullish(),
+  "costPrice": numberType().nullish(),
+  "categoryId": numberType(),
+  "categoryName": stringType(),
   "barcode": stringType().nullish(),
-  "categoryId": numberType().nullish(),
-  "categoryName": stringType().nullish(),
-  "active": booleanType(),
-  "stock": numberType().nullish()
+  "image": stringType().nullish(),
+  "isAvailable": booleanType(),
+  "preparationTime": numberType().nullish(),
+  "calories": numberType().nullish(),
+  "createdAt": stringType()
 });
 var GetProductParams = objectType({
   "id": coerce.number()
 });
 var GetProductResponse = objectType({
   "id": numberType(),
-  "number": numberType(),
   "name": stringType(),
+  "nameAr": stringType(),
+  "description": stringType().nullish(),
   "price": numberType(),
-  "cost": numberType().nullish(),
+  "costPrice": numberType().nullish(),
+  "categoryId": numberType(),
+  "categoryName": stringType(),
   "barcode": stringType().nullish(),
-  "categoryId": numberType().nullish(),
-  "categoryName": stringType().nullish(),
-  "active": booleanType(),
-  "stock": numberType().nullish()
+  "image": stringType().nullish(),
+  "isAvailable": booleanType(),
+  "preparationTime": numberType().nullish(),
+  "calories": numberType().nullish(),
+  "createdAt": stringType()
 });
 var UpdateProductParams = objectType({
   "id": coerce.number()
 });
 var UpdateProductBody = objectType({
-  "name": stringType(),
-  "number": numberType(),
-  "price": numberType(),
-  "cost": numberType().nullish(),
+  "name": stringType().optional(),
+  "nameAr": stringType().optional(),
+  "description": stringType().nullish(),
+  "price": numberType().optional(),
+  "costPrice": numberType().nullish(),
+  "categoryId": numberType().optional(),
   "barcode": stringType().nullish(),
-  "categoryId": numberType().nullish(),
-  "active": booleanType().optional(),
-  "stock": numberType().nullish()
+  "image": stringType().nullish(),
+  "isAvailable": booleanType().optional(),
+  "preparationTime": numberType().nullish(),
+  "calories": numberType().nullish()
 });
 var UpdateProductResponse = objectType({
   "id": numberType(),
-  "number": numberType(),
   "name": stringType(),
+  "nameAr": stringType(),
+  "description": stringType().nullish(),
   "price": numberType(),
-  "cost": numberType().nullish(),
+  "costPrice": numberType().nullish(),
+  "categoryId": numberType(),
+  "categoryName": stringType(),
   "barcode": stringType().nullish(),
-  "categoryId": numberType().nullish(),
-  "categoryName": stringType().nullish(),
-  "active": booleanType(),
-  "stock": numberType().nullish()
+  "image": stringType().nullish(),
+  "isAvailable": booleanType(),
+  "preparationTime": numberType().nullish(),
+  "calories": numberType().nullish(),
+  "createdAt": stringType()
 });
 var DeleteProductParams = objectType({
   "id": coerce.number()
 });
 var DeleteProductResponse = voidType();
+var GetTablesQueryParams = objectType({
+  "status": unionType([literalType("available"), literalType("occupied"), literalType("reserved"), literalType(null)]).nullish()
+});
+var GetTablesResponseItem = objectType({
+  "id": numberType(),
+  "number": numberType(),
+  "name": stringType(),
+  "capacity": numberType(),
+  "status": enumType(["available", "occupied", "reserved"]),
+  "section": stringType().nullish(),
+  "currentOrderId": numberType().nullish(),
+  "createdAt": stringType()
+});
+var GetTablesResponse = arrayType(GetTablesResponseItem);
+var CreateTableBody = objectType({
+  "number": numberType(),
+  "name": stringType(),
+  "capacity": numberType(),
+  "section": stringType().nullish()
+});
+var CreateTableResponse = objectType({
+  "id": numberType(),
+  "number": numberType(),
+  "name": stringType(),
+  "capacity": numberType(),
+  "status": enumType(["available", "occupied", "reserved"]),
+  "section": stringType().nullish(),
+  "currentOrderId": numberType().nullish(),
+  "createdAt": stringType()
+});
+var GetTableParams = objectType({
+  "id": coerce.number()
+});
+var GetTableResponse = objectType({
+  "id": numberType(),
+  "number": numberType(),
+  "name": stringType(),
+  "capacity": numberType(),
+  "status": enumType(["available", "occupied", "reserved"]),
+  "section": stringType().nullish(),
+  "currentOrderId": numberType().nullish(),
+  "createdAt": stringType()
+});
+var UpdateTableParams = objectType({
+  "id": coerce.number()
+});
+var UpdateTableBody = objectType({
+  "number": numberType().optional(),
+  "name": stringType().optional(),
+  "capacity": numberType().optional(),
+  "status": enumType(["available", "occupied", "reserved"]).optional(),
+  "section": stringType().nullish()
+});
+var UpdateTableResponse = objectType({
+  "id": numberType(),
+  "number": numberType(),
+  "name": stringType(),
+  "capacity": numberType(),
+  "status": enumType(["available", "occupied", "reserved"]),
+  "section": stringType().nullish(),
+  "currentOrderId": numberType().nullish(),
+  "createdAt": stringType()
+});
+var DeleteTableParams = objectType({
+  "id": coerce.number()
+});
+var DeleteTableResponse = voidType();
 var GetOrdersQueryParams = objectType({
-  "startDate": coerce.string().optional(),
-  "endDate": coerce.string().optional(),
-  "userId": coerce.number().optional(),
-  "orderType": enumType(["dine-in", "takeout", "delivery"]).optional()
+  "status": coerce.string().nullish(),
+  "type": coerce.string().nullish(),
+  "date": coerce.string().nullish()
 });
 var GetOrdersResponseItem = objectType({
   "id": numberType(),
-  "invoiceNumber": stringType(),
-  "subtotal": numberType().optional(),
-  "discount": numberType().optional(),
-  "tax": numberType().optional(),
-  "total": numberType(),
-  "paymentMethod": enumType(["cash", "card", "mixed"]),
-  "cashAmount": numberType().nullish(),
-  "cardAmount": numberType().nullish(),
+  "orderNumber": stringType(),
+  "type": enumType(["dine_in", "takeaway", "delivery"]),
+  "status": enumType(["pending", "confirmed", "preparing", "ready", "served", "paid", "cancelled"]),
+  "tableId": numberType().nullish(),
+  "tableName": stringType().nullish(),
   "customerId": numberType().nullish(),
   "customerName": stringType().nullish(),
-  "userId": numberType().optional(),
-  "userName": stringType().optional(),
-  "note": stringType().nullish(),
-  "orderType": enumType(["dine-in", "takeout", "delivery"]).optional(),
-  "tableNumber": stringType().nullish(),
-  "createdAt": stringType(),
   "items": arrayType(objectType({
+    "id": numberType(),
     "productId": numberType(),
     "productName": stringType(),
+    "productNameAr": stringType(),
     "quantity": numberType(),
     "unitPrice": numberType(),
-    "total": numberType(),
-    "categoryId": numberType().nullish(),
-    "categoryName": stringType().nullish()
-  })).optional()
+    "totalPrice": numberType(),
+    "notes": stringType().nullish(),
+    "status": enumType(["pending", "preparing", "ready", "served"])
+  })),
+  "subtotal": numberType(),
+  "discount": numberType(),
+  "tax": numberType(),
+  "total": numberType(),
+  "paymentMethod": unionType([literalType("cash"), literalType("card"), literalType("transfer"), literalType("wallet"), literalType(null)]).nullish(),
+  "notes": stringType().nullish(),
+  "createdAt": stringType(),
+  "updatedAt": stringType()
 });
 var GetOrdersResponse = arrayType(GetOrdersResponseItem);
 var CreateOrderBody = objectType({
+  "type": enumType(["dine_in", "takeaway", "delivery"]),
+  "tableId": numberType().nullish(),
+  "customerId": numberType().nullish(),
   "items": arrayType(objectType({
     "productId": numberType(),
     "quantity": numberType(),
-    "unitPrice": numberType()
+    "notes": stringType().nullish()
   })),
-  "paymentMethod": enumType(["cash", "card", "mixed"]),
-  "subtotal": numberType().optional(),
   "discount": numberType().optional(),
-  "tax": numberType().optional(),
-  "total": numberType(),
-  "cashAmount": numberType().nullish(),
-  "cardAmount": numberType().nullish(),
-  "customerId": numberType().nullish(),
-  "userId": numberType().optional(),
-  "note": stringType().nullish(),
-  "orderType": enumType(["dine-in", "takeout", "delivery"]).optional(),
-  "tableNumber": stringType().nullish()
+  "notes": stringType().nullish()
 });
 var CreateOrderResponse = objectType({
   "id": numberType(),
-  "invoiceNumber": stringType(),
-  "subtotal": numberType().optional(),
-  "discount": numberType().optional(),
-  "tax": numberType().optional(),
-  "total": numberType(),
-  "paymentMethod": enumType(["cash", "card", "mixed"]),
-  "cashAmount": numberType().nullish(),
-  "cardAmount": numberType().nullish(),
+  "orderNumber": stringType(),
+  "type": enumType(["dine_in", "takeaway", "delivery"]),
+  "status": enumType(["pending", "confirmed", "preparing", "ready", "served", "paid", "cancelled"]),
+  "tableId": numberType().nullish(),
+  "tableName": stringType().nullish(),
   "customerId": numberType().nullish(),
   "customerName": stringType().nullish(),
-  "userId": numberType().optional(),
-  "userName": stringType().optional(),
-  "note": stringType().nullish(),
-  "orderType": enumType(["dine-in", "takeout", "delivery"]).optional(),
-  "tableNumber": stringType().nullish(),
-  "createdAt": stringType(),
   "items": arrayType(objectType({
+    "id": numberType(),
     "productId": numberType(),
     "productName": stringType(),
+    "productNameAr": stringType(),
     "quantity": numberType(),
     "unitPrice": numberType(),
-    "total": numberType(),
-    "categoryId": numberType().nullish(),
-    "categoryName": stringType().nullish()
-  })).optional()
+    "totalPrice": numberType(),
+    "notes": stringType().nullish(),
+    "status": enumType(["pending", "preparing", "ready", "served"])
+  })),
+  "subtotal": numberType(),
+  "discount": numberType(),
+  "tax": numberType(),
+  "total": numberType(),
+  "paymentMethod": unionType([literalType("cash"), literalType("card"), literalType("transfer"), literalType("wallet"), literalType(null)]).nullish(),
+  "notes": stringType().nullish(),
+  "createdAt": stringType(),
+  "updatedAt": stringType()
 });
 var GetOrderParams = objectType({
   "id": coerce.number()
 });
 var GetOrderResponse = objectType({
   "id": numberType(),
-  "invoiceNumber": stringType(),
-  "subtotal": numberType().optional(),
-  "discount": numberType().optional(),
-  "tax": numberType().optional(),
-  "total": numberType(),
-  "paymentMethod": enumType(["cash", "card", "mixed"]),
-  "cashAmount": numberType().nullish(),
-  "cardAmount": numberType().nullish(),
+  "orderNumber": stringType(),
+  "type": enumType(["dine_in", "takeaway", "delivery"]),
+  "status": enumType(["pending", "confirmed", "preparing", "ready", "served", "paid", "cancelled"]),
+  "tableId": numberType().nullish(),
+  "tableName": stringType().nullish(),
   "customerId": numberType().nullish(),
   "customerName": stringType().nullish(),
-  "userId": numberType().optional(),
-  "userName": stringType().optional(),
-  "note": stringType().nullish(),
-  "orderType": enumType(["dine-in", "takeout", "delivery"]).optional(),
-  "tableNumber": stringType().nullish(),
-  "createdAt": stringType(),
   "items": arrayType(objectType({
+    "id": numberType(),
     "productId": numberType(),
     "productName": stringType(),
+    "productNameAr": stringType(),
     "quantity": numberType(),
     "unitPrice": numberType(),
-    "total": numberType(),
-    "categoryId": numberType().nullish(),
-    "categoryName": stringType().nullish()
-  })).optional()
+    "totalPrice": numberType(),
+    "notes": stringType().nullish(),
+    "status": enumType(["pending", "preparing", "ready", "served"])
+  })),
+  "subtotal": numberType(),
+  "discount": numberType(),
+  "tax": numberType(),
+  "total": numberType(),
+  "paymentMethod": unionType([literalType("cash"), literalType("card"), literalType("transfer"), literalType("wallet"), literalType(null)]).nullish(),
+  "notes": stringType().nullish(),
+  "createdAt": stringType(),
+  "updatedAt": stringType()
+});
+var UpdateOrderParams = objectType({
+  "id": coerce.number()
+});
+var UpdateOrderBody = objectType({
+  "type": enumType(["dine_in", "takeaway", "delivery"]).optional(),
+  "tableId": numberType().nullish(),
+  "customerId": numberType().nullish(),
+  "items": arrayType(objectType({
+    "productId": numberType(),
+    "quantity": numberType(),
+    "notes": stringType().nullish()
+  })).optional(),
+  "discount": numberType().optional(),
+  "notes": stringType().nullish()
+});
+var UpdateOrderResponse = objectType({
+  "id": numberType(),
+  "orderNumber": stringType(),
+  "type": enumType(["dine_in", "takeaway", "delivery"]),
+  "status": enumType(["pending", "confirmed", "preparing", "ready", "served", "paid", "cancelled"]),
+  "tableId": numberType().nullish(),
+  "tableName": stringType().nullish(),
+  "customerId": numberType().nullish(),
+  "customerName": stringType().nullish(),
+  "items": arrayType(objectType({
+    "id": numberType(),
+    "productId": numberType(),
+    "productName": stringType(),
+    "productNameAr": stringType(),
+    "quantity": numberType(),
+    "unitPrice": numberType(),
+    "totalPrice": numberType(),
+    "notes": stringType().nullish(),
+    "status": enumType(["pending", "preparing", "ready", "served"])
+  })),
+  "subtotal": numberType(),
+  "discount": numberType(),
+  "tax": numberType(),
+  "total": numberType(),
+  "paymentMethod": unionType([literalType("cash"), literalType("card"), literalType("transfer"), literalType("wallet"), literalType(null)]).nullish(),
+  "notes": stringType().nullish(),
+  "createdAt": stringType(),
+  "updatedAt": stringType()
 });
 var DeleteOrderParams = objectType({
   "id": coerce.number()
 });
 var DeleteOrderResponse = voidType();
+var UpdateOrderStatusParams = objectType({
+  "id": coerce.number()
+});
+var UpdateOrderStatusBody = objectType({
+  "status": enumType(["pending", "confirmed", "preparing", "ready", "served", "paid", "cancelled"])
+});
+var UpdateOrderStatusResponse = objectType({
+  "id": numberType(),
+  "orderNumber": stringType(),
+  "type": enumType(["dine_in", "takeaway", "delivery"]),
+  "status": enumType(["pending", "confirmed", "preparing", "ready", "served", "paid", "cancelled"]),
+  "tableId": numberType().nullish(),
+  "tableName": stringType().nullish(),
+  "customerId": numberType().nullish(),
+  "customerName": stringType().nullish(),
+  "items": arrayType(objectType({
+    "id": numberType(),
+    "productId": numberType(),
+    "productName": stringType(),
+    "productNameAr": stringType(),
+    "quantity": numberType(),
+    "unitPrice": numberType(),
+    "totalPrice": numberType(),
+    "notes": stringType().nullish(),
+    "status": enumType(["pending", "preparing", "ready", "served"])
+  })),
+  "subtotal": numberType(),
+  "discount": numberType(),
+  "tax": numberType(),
+  "total": numberType(),
+  "paymentMethod": unionType([literalType("cash"), literalType("card"), literalType("transfer"), literalType("wallet"), literalType(null)]).nullish(),
+  "notes": stringType().nullish(),
+  "createdAt": stringType(),
+  "updatedAt": stringType()
+});
+var PayOrderParams = objectType({
+  "id": coerce.number()
+});
+var PayOrderBody = objectType({
+  "paymentMethod": enumType(["cash", "card", "transfer", "wallet"]),
+  "discount": numberType().optional(),
+  "amountPaid": numberType()
+});
+var PayOrderResponse = objectType({
+  "id": numberType(),
+  "orderNumber": stringType(),
+  "type": enumType(["dine_in", "takeaway", "delivery"]),
+  "status": enumType(["pending", "confirmed", "preparing", "ready", "served", "paid", "cancelled"]),
+  "tableId": numberType().nullish(),
+  "tableName": stringType().nullish(),
+  "customerId": numberType().nullish(),
+  "customerName": stringType().nullish(),
+  "items": arrayType(objectType({
+    "id": numberType(),
+    "productId": numberType(),
+    "productName": stringType(),
+    "productNameAr": stringType(),
+    "quantity": numberType(),
+    "unitPrice": numberType(),
+    "totalPrice": numberType(),
+    "notes": stringType().nullish(),
+    "status": enumType(["pending", "preparing", "ready", "served"])
+  })),
+  "subtotal": numberType(),
+  "discount": numberType(),
+  "tax": numberType(),
+  "total": numberType(),
+  "paymentMethod": unionType([literalType("cash"), literalType("card"), literalType("transfer"), literalType("wallet"), literalType(null)]).nullish(),
+  "notes": stringType().nullish(),
+  "createdAt": stringType(),
+  "updatedAt": stringType()
+});
+var GetKitchenOrdersResponseItem = objectType({
+  "id": numberType(),
+  "orderNumber": stringType(),
+  "type": enumType(["dine_in", "takeaway", "delivery"]),
+  "status": enumType(["pending", "confirmed", "preparing", "ready", "served", "paid", "cancelled"]),
+  "tableId": numberType().nullish(),
+  "tableName": stringType().nullish(),
+  "customerId": numberType().nullish(),
+  "customerName": stringType().nullish(),
+  "items": arrayType(objectType({
+    "id": numberType(),
+    "productId": numberType(),
+    "productName": stringType(),
+    "productNameAr": stringType(),
+    "quantity": numberType(),
+    "unitPrice": numberType(),
+    "totalPrice": numberType(),
+    "notes": stringType().nullish(),
+    "status": enumType(["pending", "preparing", "ready", "served"])
+  })),
+  "subtotal": numberType(),
+  "discount": numberType(),
+  "tax": numberType(),
+  "total": numberType(),
+  "paymentMethod": unionType([literalType("cash"), literalType("card"), literalType("transfer"), literalType("wallet"), literalType(null)]).nullish(),
+  "notes": stringType().nullish(),
+  "createdAt": stringType(),
+  "updatedAt": stringType()
+});
+var GetKitchenOrdersResponse = arrayType(GetKitchenOrdersResponseItem);
+var GetCustomersQueryParams = objectType({
+  "search": coerce.string().nullish()
+});
 var GetCustomersResponseItem = objectType({
   "id": numberType(),
   "name": stringType(),
   "phone": stringType().nullish(),
   "email": stringType().nullish(),
   "address": stringType().nullish(),
-  "totalPurchases": numberType().optional(),
-  "createdAt": stringType().optional()
+  "loyaltyPoints": numberType(),
+  "totalOrders": numberType(),
+  "totalSpent": numberType(),
+  "notes": stringType().nullish(),
+  "createdAt": stringType()
 });
 var GetCustomersResponse = arrayType(GetCustomersResponseItem);
 var CreateCustomerBody = objectType({
   "name": stringType(),
   "phone": stringType().nullish(),
   "email": stringType().nullish(),
-  "address": stringType().nullish()
+  "address": stringType().nullish(),
+  "notes": stringType().nullish()
 });
 var CreateCustomerResponse = objectType({
   "id": numberType(),
@@ -32777,17 +33220,36 @@ var CreateCustomerResponse = objectType({
   "phone": stringType().nullish(),
   "email": stringType().nullish(),
   "address": stringType().nullish(),
-  "totalPurchases": numberType().optional(),
-  "createdAt": stringType().optional()
+  "loyaltyPoints": numberType(),
+  "totalOrders": numberType(),
+  "totalSpent": numberType(),
+  "notes": stringType().nullish(),
+  "createdAt": stringType()
+});
+var GetCustomerParams = objectType({
+  "id": coerce.number()
+});
+var GetCustomerResponse = objectType({
+  "id": numberType(),
+  "name": stringType(),
+  "phone": stringType().nullish(),
+  "email": stringType().nullish(),
+  "address": stringType().nullish(),
+  "loyaltyPoints": numberType(),
+  "totalOrders": numberType(),
+  "totalSpent": numberType(),
+  "notes": stringType().nullish(),
+  "createdAt": stringType()
 });
 var UpdateCustomerParams = objectType({
   "id": coerce.number()
 });
 var UpdateCustomerBody = objectType({
-  "name": stringType(),
+  "name": stringType().optional(),
   "phone": stringType().nullish(),
   "email": stringType().nullish(),
-  "address": stringType().nullish()
+  "address": stringType().nullish(),
+  "notes": stringType().nullish()
 });
 var UpdateCustomerResponse = objectType({
   "id": numberType(),
@@ -32795,344 +33257,224 @@ var UpdateCustomerResponse = objectType({
   "phone": stringType().nullish(),
   "email": stringType().nullish(),
   "address": stringType().nullish(),
-  "totalPurchases": numberType().optional(),
-  "createdAt": stringType().optional()
+  "loyaltyPoints": numberType(),
+  "totalOrders": numberType(),
+  "totalSpent": numberType(),
+  "notes": stringType().nullish(),
+  "createdAt": stringType()
 });
 var DeleteCustomerParams = objectType({
   "id": coerce.number()
 });
 var DeleteCustomerResponse = voidType();
-var GetUsersResponseItem = objectType({
+var GetInventoryItemsQueryParams = objectType({
+  "search": coerce.string().nullish(),
+  "lowStock": coerce.boolean().nullish()
+});
+var GetInventoryItemsResponseItem = objectType({
   "id": numberType(),
-  "username": stringType(),
   "name": stringType(),
-  "role": enumType(["admin", "cashier"]),
-  "active": booleanType()
+  "nameAr": stringType(),
+  "unit": stringType(),
+  "currentStock": numberType(),
+  "minStock": numberType(),
+  "maxStock": numberType().nullish(),
+  "costPerUnit": numberType(),
+  "totalValue": numberType(),
+  "supplier": stringType().nullish(),
+  "isLowStock": booleanType(),
+  "createdAt": stringType()
 });
-var GetUsersResponse = arrayType(GetUsersResponseItem);
-var CreateUserBody = objectType({
-  "username": stringType(),
+var GetInventoryItemsResponse = arrayType(GetInventoryItemsResponseItem);
+var CreateInventoryItemBody = objectType({
   "name": stringType(),
-  "role": enumType(["admin", "cashier"]),
-  "password": stringType(),
-  "active": booleanType().optional()
+  "nameAr": stringType(),
+  "unit": stringType(),
+  "currentStock": numberType(),
+  "minStock": numberType(),
+  "maxStock": numberType().nullish(),
+  "costPerUnit": numberType(),
+  "supplier": stringType().nullish()
 });
-var CreateUserResponse = objectType({
+var CreateInventoryItemResponse = objectType({
   "id": numberType(),
-  "username": stringType(),
   "name": stringType(),
-  "role": enumType(["admin", "cashier"]),
-  "active": booleanType()
+  "nameAr": stringType(),
+  "unit": stringType(),
+  "currentStock": numberType(),
+  "minStock": numberType(),
+  "maxStock": numberType().nullish(),
+  "costPerUnit": numberType(),
+  "totalValue": numberType(),
+  "supplier": stringType().nullish(),
+  "isLowStock": booleanType(),
+  "createdAt": stringType()
 });
-var UpdateUserParams = objectType({
+var GetInventoryItemParams = objectType({
   "id": coerce.number()
 });
-var UpdateUserBody = objectType({
-  "username": stringType().optional(),
+var GetInventoryItemResponse = objectType({
+  "id": numberType(),
+  "name": stringType(),
+  "nameAr": stringType(),
+  "unit": stringType(),
+  "currentStock": numberType(),
+  "minStock": numberType(),
+  "maxStock": numberType().nullish(),
+  "costPerUnit": numberType(),
+  "totalValue": numberType(),
+  "supplier": stringType().nullish(),
+  "isLowStock": booleanType(),
+  "createdAt": stringType()
+});
+var UpdateInventoryItemParams = objectType({
+  "id": coerce.number()
+});
+var UpdateInventoryItemBody = objectType({
   "name": stringType().optional(),
-  "role": enumType(["admin", "cashier"]).optional(),
-  "password": stringType().nullish(),
-  "active": booleanType().optional()
+  "nameAr": stringType().optional(),
+  "unit": stringType().optional(),
+  "currentStock": numberType().optional(),
+  "minStock": numberType().optional(),
+  "maxStock": numberType().nullish(),
+  "costPerUnit": numberType().optional(),
+  "supplier": stringType().nullish()
 });
-var UpdateUserResponse = objectType({
+var UpdateInventoryItemResponse = objectType({
   "id": numberType(),
-  "username": stringType(),
   "name": stringType(),
-  "role": enumType(["admin", "cashier"]),
-  "active": booleanType()
+  "nameAr": stringType(),
+  "unit": stringType(),
+  "currentStock": numberType(),
+  "minStock": numberType(),
+  "maxStock": numberType().nullish(),
+  "costPerUnit": numberType(),
+  "totalValue": numberType(),
+  "supplier": stringType().nullish(),
+  "isLowStock": booleanType(),
+  "createdAt": stringType()
 });
-var DeleteUserParams = objectType({
+var DeleteInventoryItemParams = objectType({
   "id": coerce.number()
 });
-var DeleteUserResponse = voidType();
-var GetDashboardSummaryResponse = objectType({
-  "todaySales": numberType(),
-  "todayOrders": numberType(),
-  "todayProfit": numberType(),
-  "monthSales": numberType(),
-  "monthOrders": numberType(),
-  "totalProducts": numberType().optional(),
-  "totalCustomers": numberType().optional()
+var DeleteInventoryItemResponse = voidType();
+var GetInventorySummaryResponse = objectType({
+  "totalItems": numberType(),
+  "lowStockItems": numberType(),
+  "totalValue": numberType(),
+  "outOfStockItems": numberType()
 });
-var GetTopProductsResponseItem = objectType({
-  "productId": numberType(),
-  "productName": stringType(),
-  "totalQty": numberType(),
-  "totalRevenue": numberType()
+var GetEmployeesQueryParams = objectType({
+  "search": coerce.string().nullish(),
+  "role": coerce.string().nullish()
 });
-var GetTopProductsResponse = arrayType(GetTopProductsResponseItem);
-var GetSalesByHourResponseItem = objectType({
-  "hour": numberType(),
-  "total": numberType(),
-  "orders": numberType()
-});
-var GetSalesByHourResponse = arrayType(GetSalesByHourResponseItem);
-var GetSettingsResponse = objectType({
-  "businessName": stringType(),
-  "address": stringType().nullish(),
+var GetEmployeesResponseItem = objectType({
+  "id": numberType(),
+  "name": stringType(),
   "phone": stringType().nullish(),
-  "taxNumber": stringType().nullish(),
-  "taxRate": numberType().optional(),
-  "currency": stringType().optional(),
-  "receiptMessage": stringType().nullish(),
-  "printLogo": booleanType().optional(),
-  "printQr": booleanType().optional(),
-  "showCashier": booleanType().optional(),
-  "showCustomer": booleanType().optional(),
-  "receiptPaperSize": stringType().optional(),
-  "showOrderNumber": booleanType().optional(),
-  "showTableNumber": booleanType().optional(),
-  "showDateTime": booleanType().optional(),
-  "showBarcode": booleanType().optional(),
-  "showOrderType": booleanType().optional(),
-  "showTax": booleanType().optional(),
-  "showDiscount": booleanType().optional(),
-  "showNotes": booleanType().optional(),
-  "autoPrintTrigger": stringType().optional(),
-  "maxReprintCount": numberType().optional(),
-  "masterCopiesCount": numberType().optional(),
-  "logoUrl": stringType().nullish()
+  "email": stringType().nullish(),
+  "role": enumType(["admin", "manager", "cashier", "waiter", "chef", "driver"]),
+  "salary": numberType().nullish(),
+  "isActive": booleanType(),
+  "joinDate": stringType(),
+  "createdAt": stringType()
 });
-var UpdateSettingsBody = objectType({
-  "businessName": stringType().optional(),
-  "address": stringType().nullish(),
+var GetEmployeesResponse = arrayType(GetEmployeesResponseItem);
+var CreateEmployeeBody = objectType({
+  "name": stringType(),
   "phone": stringType().nullish(),
-  "taxNumber": stringType().nullish(),
-  "taxRate": numberType().optional(),
-  "currency": stringType().optional(),
-  "receiptMessage": stringType().nullish(),
-  "printLogo": booleanType().optional(),
-  "printQr": booleanType().optional(),
-  "showCashier": booleanType().optional(),
-  "showCustomer": booleanType().optional(),
-  "receiptPaperSize": stringType().optional(),
-  "showOrderNumber": booleanType().optional(),
-  "showTableNumber": booleanType().optional(),
-  "showDateTime": booleanType().optional(),
-  "showBarcode": booleanType().optional(),
-  "showOrderType": booleanType().optional(),
-  "showTax": booleanType().optional(),
-  "showDiscount": booleanType().optional(),
-  "showNotes": booleanType().optional(),
-  "autoPrintTrigger": stringType().optional(),
-  "maxReprintCount": numberType().optional(),
-  "masterCopiesCount": numberType().optional(),
-  "logoUrl": stringType().nullish()
+  "email": stringType().nullish(),
+  "role": enumType(["admin", "manager", "cashier", "waiter", "chef", "driver"]),
+  "salary": numberType().nullish(),
+  "joinDate": stringType()
 });
-var UpdateSettingsResponse = objectType({
-  "businessName": stringType(),
-  "address": stringType().nullish(),
+var CreateEmployeeResponse = objectType({
+  "id": numberType(),
+  "name": stringType(),
   "phone": stringType().nullish(),
-  "taxNumber": stringType().nullish(),
-  "taxRate": numberType().optional(),
-  "currency": stringType().optional(),
-  "receiptMessage": stringType().nullish(),
-  "printLogo": booleanType().optional(),
-  "printQr": booleanType().optional(),
-  "showCashier": booleanType().optional(),
-  "showCustomer": booleanType().optional(),
-  "receiptPaperSize": stringType().optional(),
-  "showOrderNumber": booleanType().optional(),
-  "showTableNumber": booleanType().optional(),
-  "showDateTime": booleanType().optional(),
-  "showBarcode": booleanType().optional(),
-  "showOrderType": booleanType().optional(),
-  "showTax": booleanType().optional(),
-  "showDiscount": booleanType().optional(),
-  "showNotes": booleanType().optional(),
-  "autoPrintTrigger": stringType().optional(),
-  "maxReprintCount": numberType().optional(),
-  "masterCopiesCount": numberType().optional(),
-  "logoUrl": stringType().nullish()
+  "email": stringType().nullish(),
+  "role": enumType(["admin", "manager", "cashier", "waiter", "chef", "driver"]),
+  "salary": numberType().nullish(),
+  "isActive": booleanType(),
+  "joinDate": stringType(),
+  "createdAt": stringType()
 });
+var GetEmployeeParams = objectType({
+  "id": coerce.number()
+});
+var GetEmployeeResponse = objectType({
+  "id": numberType(),
+  "name": stringType(),
+  "phone": stringType().nullish(),
+  "email": stringType().nullish(),
+  "role": enumType(["admin", "manager", "cashier", "waiter", "chef", "driver"]),
+  "salary": numberType().nullish(),
+  "isActive": booleanType(),
+  "joinDate": stringType(),
+  "createdAt": stringType()
+});
+var UpdateEmployeeParams = objectType({
+  "id": coerce.number()
+});
+var UpdateEmployeeBody = objectType({
+  "name": stringType().optional(),
+  "phone": stringType().nullish(),
+  "email": stringType().nullish(),
+  "role": enumType(["admin", "manager", "cashier", "waiter", "chef", "driver"]).optional(),
+  "salary": numberType().nullish(),
+  "isActive": booleanType().optional(),
+  "joinDate": stringType().optional()
+});
+var UpdateEmployeeResponse = objectType({
+  "id": numberType(),
+  "name": stringType(),
+  "phone": stringType().nullish(),
+  "email": stringType().nullish(),
+  "role": enumType(["admin", "manager", "cashier", "waiter", "chef", "driver"]),
+  "salary": numberType().nullish(),
+  "isActive": booleanType(),
+  "joinDate": stringType(),
+  "createdAt": stringType()
+});
+var DeleteEmployeeParams = objectType({
+  "id": coerce.number()
+});
+var DeleteEmployeeResponse = voidType();
 var GetSalesReportQueryParams = objectType({
-  "startDate": coerce.string().optional(),
-  "endDate": coerce.string().optional(),
-  "groupBy": enumType(["day", "month", "year"]).optional()
+  "from": coerce.string().nullish(),
+  "to": coerce.string().nullish()
 });
-var GetSalesReportResponseItem = objectType({
-  "period": stringType(),
-  "total": numberType(),
-  "orders": numberType(),
-  "profit": numberType()
+var GetSalesReportResponse = objectType({
+  "totalRevenue": numberType(),
+  "totalOrders": numberType(),
+  "totalDiscount": numberType(),
+  "totalTax": numberType(),
+  "averageOrderValue": numberType(),
+  "byPaymentMethod": arrayType(objectType({
+    "method": stringType(),
+    "count": numberType(),
+    "total": numberType()
+  })),
+  "byOrderType": arrayType(objectType({
+    "type": stringType(),
+    "count": numberType(),
+    "total": numberType()
+  }))
 });
-var GetSalesReportResponse = arrayType(GetSalesReportResponseItem);
-var GetReceiptCopyConfigsResponseItem = objectType({
+var GetProductsReportQueryParams = objectType({
+  "from": coerce.string().nullish(),
+  "to": coerce.string().nullish()
+});
+var GetProductsReportResponseItem = objectType({
   "id": numberType(),
-  "copyNumber": numberType(),
-  "label": stringType(),
-  "enabled": booleanType()
+  "name": stringType(),
+  "nameAr": stringType(),
+  "categoryName": stringType(),
+  "totalSold": numberType(),
+  "totalRevenue": numberType(),
+  "averagePrice": numberType()
 });
-var GetReceiptCopyConfigsResponse = arrayType(GetReceiptCopyConfigsResponseItem);
-var CreateReceiptCopyConfigBody = objectType({
-  "copyNumber": numberType(),
-  "label": stringType(),
-  "enabled": booleanType().optional()
-});
-var CreateReceiptCopyConfigResponse = objectType({
-  "id": numberType(),
-  "copyNumber": numberType(),
-  "label": stringType(),
-  "enabled": booleanType()
-});
-var UpdateReceiptCopyConfigParams = objectType({
-  "id": coerce.number()
-});
-var UpdateReceiptCopyConfigBody = objectType({
-  "copyNumber": numberType(),
-  "label": stringType(),
-  "enabled": booleanType().optional()
-});
-var UpdateReceiptCopyConfigResponse = objectType({
-  "id": numberType(),
-  "copyNumber": numberType(),
-  "label": stringType(),
-  "enabled": booleanType()
-});
-var DeleteReceiptCopyConfigParams = objectType({
-  "id": coerce.number()
-});
-var DeleteReceiptCopyConfigResponse = voidType();
-var GetDepartmentPrintConfigsResponseItem = objectType({
-  "id": numberType(),
-  "categoryId": numberType().nullish(),
-  "categoryName": stringType().nullish(),
-  "printerName": stringType().nullish(),
-  "copies": numberType(),
-  "enabled": booleanType(),
-  "printOrder": numberType()
-});
-var GetDepartmentPrintConfigsResponse = arrayType(GetDepartmentPrintConfigsResponseItem);
-var CreateDepartmentPrintConfigBody = objectType({
-  "categoryId": numberType().nullish(),
-  "printerName": stringType().nullish(),
-  "copies": numberType().optional(),
-  "enabled": booleanType().optional(),
-  "printOrder": numberType().optional()
-});
-var CreateDepartmentPrintConfigResponse = objectType({
-  "id": numberType(),
-  "categoryId": numberType().nullish(),
-  "categoryName": stringType().nullish(),
-  "printerName": stringType().nullish(),
-  "copies": numberType(),
-  "enabled": booleanType(),
-  "printOrder": numberType()
-});
-var UpdateDepartmentPrintConfigParams = objectType({
-  "id": coerce.number()
-});
-var UpdateDepartmentPrintConfigBody = objectType({
-  "categoryId": numberType().nullish(),
-  "printerName": stringType().nullish(),
-  "copies": numberType().optional(),
-  "enabled": booleanType().optional(),
-  "printOrder": numberType().optional()
-});
-var UpdateDepartmentPrintConfigResponse = objectType({
-  "id": numberType(),
-  "categoryId": numberType().nullish(),
-  "categoryName": stringType().nullish(),
-  "printerName": stringType().nullish(),
-  "copies": numberType(),
-  "enabled": booleanType(),
-  "printOrder": numberType()
-});
-var DeleteDepartmentPrintConfigParams = objectType({
-  "id": coerce.number()
-});
-var DeleteDepartmentPrintConfigResponse = voidType();
-var GetPrintLogsQueryParams = objectType({
-  "orderId": coerce.number().optional(),
-  "startDate": coerce.string().optional(),
-  "endDate": coerce.string().optional()
-});
-var GetPrintLogsResponseItem = objectType({
-  "id": numberType(),
-  "orderId": numberType(),
-  "invoiceNumber": stringType(),
-  "receiptType": stringType(),
-  "departmentName": stringType().nullish(),
-  "printerName": stringType().nullish(),
-  "printedAt": stringType(),
-  "userId": numberType(),
-  "userName": stringType().nullish(),
-  "copies": numberType(),
-  "status": enumType(["success", "failed"]),
-  "reprintReason": stringType().nullish(),
-  "reprintCount": numberType()
-});
-var GetPrintLogsResponse = arrayType(GetPrintLogsResponseItem);
-var CreatePrintLogBody = objectType({
-  "orderId": numberType(),
-  "invoiceNumber": stringType(),
-  "receiptType": stringType(),
-  "departmentName": stringType().nullish(),
-  "printerName": stringType().nullish(),
-  "copies": numberType().optional()
-});
-var CreatePrintLogResponse = objectType({
-  "id": numberType(),
-  "orderId": numberType(),
-  "invoiceNumber": stringType(),
-  "receiptType": stringType(),
-  "departmentName": stringType().nullish(),
-  "printerName": stringType().nullish(),
-  "printedAt": stringType(),
-  "userId": numberType(),
-  "userName": stringType().nullish(),
-  "copies": numberType(),
-  "status": enumType(["success", "failed"]),
-  "reprintReason": stringType().nullish(),
-  "reprintCount": numberType()
-});
-var GetPrinterSettingsResponse = objectType({
-  "paperWidth": numberType(),
-  "leftMargin": numberType(),
-  "rightMargin": numberType(),
-  "topMargin": numberType(),
-  "bottomMargin": numberType(),
-  "fontSize": numberType(),
-  "lineSpacing": numberType(),
-  "charactersPerLine": numberType()
-});
-var UpdatePrinterSettingsBody = objectType({
-  "paperWidth": numberType().optional(),
-  "leftMargin": numberType().optional(),
-  "rightMargin": numberType().optional(),
-  "topMargin": numberType().optional(),
-  "bottomMargin": numberType().optional(),
-  "fontSize": numberType().optional(),
-  "lineSpacing": numberType().optional(),
-  "charactersPerLine": numberType().optional()
-});
-var UpdatePrinterSettingsResponse = objectType({
-  "paperWidth": numberType(),
-  "leftMargin": numberType(),
-  "rightMargin": numberType(),
-  "topMargin": numberType(),
-  "bottomMargin": numberType(),
-  "fontSize": numberType(),
-  "lineSpacing": numberType(),
-  "charactersPerLine": numberType()
-});
-var GetPrintersListResponseItem = stringType();
-var GetPrintersListResponse = arrayType(GetPrintersListResponseItem);
-var PrintReceiptDirectBody = objectType({
-  "printerName": stringType().nullish(),
-  "content": stringType(),
-  "copies": numberType().optional()
-});
-var PrintReceiptDirectResponse = objectType({
-  "ok": booleanType(),
-  "message": stringType().optional()
-});
-var GetReprintCountParams = objectType({
-  "orderId": coerce.number()
-});
-var GetReprintCountResponse = objectType({
-  "reprintCount": numberType()
-});
+var GetProductsReportResponse = arrayType(GetProductsReportResponseItem);
 
 // src/routes/health.ts
 var router = (0, import_express.Router)();
@@ -33361,6 +33703,20 @@ function initSchema() {
       unit_price REAL NOT NULL,
       total REAL NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS meal_deductions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id INTEGER NOT NULL REFERENCES hr_employees(id),
+      employee_name TEXT NOT NULL,
+      employee_number TEXT NOT NULL,
+      order_id INTEGER REFERENCES orders(id),
+      invoice_number TEXT,
+      amount REAL NOT NULL DEFAULT 0,
+      cashier_id INTEGER NOT NULL REFERENCES users(id),
+      cashier_name TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 }
 function runMigrations() {
@@ -33382,6 +33738,18 @@ function runMigrations() {
   }
   try {
     db.exec("ALTER TABLE printer_settings ADD COLUMN main_printer_name TEXT");
+  } catch {
+  }
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN allow_meal_deduction INTEGER NOT NULL DEFAULT 0");
+  } catch {
+  }
+  try {
+    db.exec("ALTER TABLE orders ADD COLUMN is_employee_meal INTEGER NOT NULL DEFAULT 0");
+  } catch {
+  }
+  try {
+    db.exec("ALTER TABLE orders ADD COLUMN employee_id INTEGER");
   } catch {
   }
   try {
@@ -34785,6 +35153,94 @@ router15.delete("/hr/attendance/:id", (req, res) => {
   db.prepare("DELETE FROM hr_attendance WHERE id=?").run(req.params.id);
   res.status(204).send();
 });
+router15.get("/hr/meal-deductions", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { employee_id, month } = req.query;
+  let sql = `SELECT md.*, e.name as employee_name, e.employee_number FROM meal_deductions md
+    JOIN hr_employees e ON e.id=md.employee_id WHERE 1=1`;
+  const params = [];
+  if (employee_id) {
+    sql += " AND md.employee_id=?";
+    params.push(employee_id);
+  }
+  if (month) {
+    sql += " AND strftime('%Y-%m', md.created_at)=?";
+    params.push(month);
+  }
+  sql += " ORDER BY md.created_at DESC";
+  res.json(db.prepare(sql).all(...params));
+});
+router15.post("/hr/meal-deductions", (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) {
+    res.status(401).json({ error: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D" });
+    return;
+  }
+  const { employee_id, employee_name, employee_number, order_id, invoice_number, amount, notes } = req.body;
+  if (!employee_id || !amount) {
+    res.status(400).json({ error: "\u0627\u0644\u0645\u0648\u0638\u0641 \u0648\u0627\u0644\u0645\u0628\u0644\u063A \u0645\u0637\u0644\u0648\u0628\u0627\u0646" });
+    return;
+  }
+  const r = db.prepare(`
+    INSERT INTO meal_deductions (employee_id, employee_name, employee_number, order_id, invoice_number, amount, cashier_id, cashier_name, notes)
+    VALUES (?,?,?,?,?,?,?,?,?)
+  `).run(employee_id, employee_name ?? "", employee_number ?? "", order_id ?? null, invoice_number ?? null, amount, user.id, user.name, notes ?? null);
+  res.status(201).json(db.prepare("SELECT * FROM meal_deductions WHERE id=?").get(r.lastInsertRowid));
+});
+router15.get("/hr/employees/by-number/:num", (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) {
+    res.status(401).json({ error: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D" });
+    return;
+  }
+  const emp = db.prepare(`
+    SELECT e.*, d.name as department_name,
+      (SELECT COALESCE(SUM(md.amount),0) FROM meal_deductions md WHERE md.employee_id=e.id AND strftime('%Y-%m', md.created_at)=strftime('%Y-%m','now')) as meal_deductions_this_month
+    FROM hr_employees e LEFT JOIN hr_departments d ON d.id=e.department_id
+    WHERE e.employee_number=? AND e.active=1
+  `).get(req.params.num);
+  if (!emp) {
+    res.status(404).json({ error: "\u0627\u0644\u0645\u0648\u0638\u0641 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F \u0623\u0648 \u063A\u064A\u0631 \u0646\u0634\u0637" });
+    return;
+  }
+  res.json({ ...emp, active: Boolean(emp.active) });
+});
+router15.get("/hr/salary-statement/:employee_id/:month", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { employee_id, month } = req.params;
+  const emp = db.prepare(`
+    SELECT e.*, d.name as department_name FROM hr_employees e
+    LEFT JOIN hr_departments d ON d.id=e.department_id WHERE e.id=?
+  `).get(employee_id);
+  if (!emp) {
+    res.status(404).json({ error: "\u0627\u0644\u0645\u0648\u0638\u0641 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+    return;
+  }
+  const salary = db.prepare("SELECT * FROM hr_salaries WHERE employee_id=? AND month=?").get(employee_id, month);
+  const mealDeductions = db.prepare(`
+    SELECT * FROM meal_deductions WHERE employee_id=? AND strftime('%Y-%m', created_at)=?
+    ORDER BY created_at ASC
+  `).all(employee_id, month);
+  const mealTotal = mealDeductions.reduce((s, m) => s + m.amount, 0);
+  const attendance = db.prepare(`
+    SELECT status, COUNT(*) as count FROM hr_attendance
+    WHERE employee_id=? AND strftime('%Y-%m', date)=?
+    GROUP BY status
+  `).all(employee_id, month);
+  const businessSettings = db.prepare("SELECT key, value FROM settings").all();
+  const settings = {};
+  businessSettings.forEach((s) => {
+    settings[s.key] = s.value;
+  });
+  res.json({
+    employee: { ...emp, active: Boolean(emp.active) },
+    salary: salary ?? null,
+    mealDeductions,
+    mealTotal,
+    attendance,
+    settings
+  });
+});
 router15.get("/hr/summary", (req, res) => {
   if (!requireAdmin(req, res)) return;
   const totalEmployees = db.prepare("SELECT COUNT(*) as c FROM hr_employees WHERE active=1").get().c;
@@ -34938,6 +35394,100 @@ router16.get("/returns-summary", (req, res) => {
     monthCount: monthStats.count,
     monthTotal: monthStats.total,
     totalCount
+  });
+});
+router16.get("/orders/lookup", (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) return;
+  const { q } = req.query;
+  if (!q) {
+    res.status(400).json({ error: "\u0645\u0637\u0644\u0648\u0628 \u0645\u0639\u064A\u0627\u0631 \u0627\u0644\u0628\u062D\u062B" });
+    return;
+  }
+  const searchNum = String(q).trim();
+  let orderRow = db.prepare(`
+    SELECT o.*, u.name as user_name, c.name as customer_name
+    FROM orders o
+    LEFT JOIN users u ON u.id=o.user_id
+    LEFT JOIN customers c ON c.id=o.customer_id
+    WHERE o.invoice_number=? OR o.invoice_number=? OR CAST(o.id AS TEXT)=?
+  `).get(searchNum, `INV-${searchNum.padStart(4, "0")}`, searchNum);
+  if (!orderRow) {
+    res.status(404).json({ error: "\u0644\u0645 \u064A\u062A\u0645 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629" });
+    return;
+  }
+  const items = db.prepare("SELECT * FROM order_items WHERE order_id=?").all(orderRow.id);
+  const existingReturn = db.prepare("SELECT id, return_number, total_refund FROM returns WHERE order_id=? OR invoice_number=?").get(orderRow.id, orderRow.invoice_number);
+  res.json({
+    id: orderRow.id,
+    invoiceNumber: orderRow.invoice_number,
+    total: orderRow.total,
+    subtotal: orderRow.subtotal,
+    discount: orderRow.discount,
+    tax: orderRow.tax,
+    paymentMethod: orderRow.payment_method,
+    orderType: orderRow.order_type,
+    tableNumber: orderRow.table_number,
+    note: orderRow.note,
+    createdAt: orderRow.created_at,
+    cashierName: orderRow.user_name,
+    userId: orderRow.user_id,
+    customerName: orderRow.customer_name,
+    alreadyReturned: !!existingReturn,
+    existingReturn: existingReturn ?? null,
+    items: items.map((i) => ({
+      id: i.id,
+      productId: i.product_id,
+      productName: i.product_name,
+      quantity: i.quantity,
+      unitPrice: i.unit_price,
+      total: i.total,
+      categoryId: i.category_id,
+      categoryName: i.category_name
+    }))
+  });
+});
+router16.get("/cashier-boxes", (req, res) => {
+  if (!requireAdmin2(req, res)) return;
+  const { date } = req.query;
+  const filterDate = date ?? (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const cashiers = db.prepare(`
+    SELECT u.id, u.name,
+      COALESCE(SUM(o.total),0) as orders_total,
+      COUNT(o.id) as orders_count
+    FROM users u
+    LEFT JOIN orders o ON o.user_id=u.id AND DATE(o.created_at)=?
+    WHERE u.active=1
+    GROUP BY u.id, u.name
+    ORDER BY u.name
+  `).all(filterDate);
+  const returns_ = db.prepare(`
+    SELECT o.user_id,
+      COALESCE(SUM(r.total_refund),0) as returns_total,
+      COUNT(r.id) as returns_count
+    FROM returns r
+    LEFT JOIN orders o ON o.id=r.order_id
+    WHERE DATE(r.created_at)=?
+    GROUP BY o.user_id
+  `).all(filterDate);
+  const returnsMap = new Map(returns_.map((r) => [r.user_id, r]));
+  const mainTotal = cashiers.reduce((s, c) => s + c.orders_total, 0);
+  const mainReturns = returns_.reduce((s, r) => s + r.returns_total, 0);
+  res.json({
+    date: filterDate,
+    mainBox: { total: mainTotal, returnsTotal: mainReturns, net: mainTotal - mainReturns },
+    cashiers: cashiers.map((c) => {
+      const ret = returnsMap.get(c.id);
+      return {
+        userId: c.id,
+        name: c.name,
+        ordersTotal: c.orders_total,
+        ordersCount: c.orders_count,
+        returnsTotal: ret?.returns_total ?? 0,
+        returnsCount: ret?.returns_count ?? 0,
+        net: c.orders_total - (ret?.returns_total ?? 0)
+      };
+    })
   });
 });
 var returns_default = router16;
