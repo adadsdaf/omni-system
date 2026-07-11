@@ -1,0 +1,8 @@
+{
+  "name": "Omni System Pro - نظام الكاشير المكتبي",
+  "description": "تطبيق سطح مكتب وسيرفر محلي متكامل لإدارة المبيعات ونقطة البيع مع شاشة سبلاش وتحقق أوتوماتيكي من المنفذ 3000",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
+
