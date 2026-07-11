@@ -17,18 +17,14 @@
     "jsx": "react-jsx",
     "paths": {
       "@/*": [
-        "./src/*"
+        "./src/*",
+        "./artifacts/pos-system/src/*"
       ],
       "@workspace/api-client-react": [
-        "./src/api-client-react/index.ts"
+        "./artifacts/pos-system/src/api-client.ts"
       ]
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  },
-  "exclude": [
-    "node_modules",
-    "dist",
-    "artifacts"
-  ]
+  }
 }
