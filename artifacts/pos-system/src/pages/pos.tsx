@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { flushSync } from "react-dom";
 import { PosLayout } from "@/components/pos-layout";
 import {
@@ -119,7 +119,7 @@ export default function Pos() {
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
-  const [numberInput, setNumberInput] = useState("");
+  const [typedCode, setTypedCode] = useState("");
   const [discount, setDiscount] = useState(0);
   const [orderType, setOrderType] = useState<OrderType>("dine-in");
   const [tableNumber, setTableNumber] = useState("");
@@ -132,7 +132,12 @@ export default function Pos() {
   const [reprintReason, setReprintReason] = useState("");
   const [showReprintDialog, setShowReprintDialog] = useState(false);
   const [activePrintPage, setActivePrintPage] = useState<PrintPage | null>(null);
-  const numberInputRef = useRef<HTMLInputElement>(null);
+
+  // ── تحسينات الكيبورد ونقطة المبيعات ──
+  const [selectedCartIdx, setSelectedCartIdx] = useState<number | null>(null);
+  const [qtyEditMode, setQtyEditMode] = useState<number | null>(null);
+  const lastEnterTimeRef = useRef<number>(0);
+  const isPrintingRef = useRef(false);
 
   // ── وجبات الموظفين ──
   const [mealMode, setMealMode] = useState(false);
@@ -173,24 +178,132 @@ export default function Pos() {
     }).filter(Boolean) as CartItem[]);
   };
 
+  const setItemExactQty = (productId: number, newQty: number) => {
+    setCart(prev => prev.map(i => {
+      if (i.product.id !== productId) return i;
+      return newQty <= 0 ? null : { ...i, quantity: newQty };
+    }).filter(Boolean) as CartItem[]);
+  };
+
   const subtotal = cart.reduce((s, i) => s + i.product.price * i.quantity, 0);
   const discountAmt = Math.min(discount, subtotal);
   const afterDiscount = subtotal - discountAmt;
   const taxAmt = afterDiscount * (taxRate / 100);
   const total = afterDiscount + taxAmt;
 
-  const handleNumberInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      const num = parseInt(numberInput);
-      const prod = products.find(p => p.number === num && p.active);
-      if (prod) {
-        addToCart(prod);
-        setNumberInput("");
-      } else {
-        toast({ variant: "destructive", title: "لم يتم العثور على المنتج رقم " + num });
+  // ── Global Keyboard Shortcuts Handler ──
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (showPayDialog) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          confirmPay();
+        }
+        return;
       }
-    }
-  };
+      if (showReceipt) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (lastOrder) triggerDirectPrint(lastOrder);
+        }
+        return;
+      }
+
+      const activeEl = document.activeElement;
+      const isInputActive = activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA" || activeEl.tagName === "SELECT");
+
+      if (isInputActive) return;
+
+      if (qtyEditMode !== null && /^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        const digit = parseInt(e.key);
+        const item = cart[qtyEditMode];
+        if (item) {
+          setItemExactQty(item.product.id, digit === 0 ? 10 : digit);
+        }
+        return;
+      }
+
+      if (/^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        setTypedCode(prev => prev + e.key);
+        return;
+      }
+
+      if (e.key === "Backspace") {
+        e.preventDefault();
+        setTypedCode(prev => prev.slice(0, -1));
+        return;
+      }
+
+      if (cart.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setSelectedCartIdx(prev => (prev === null ? 0 : Math.min(prev + 1, cart.length - 1)));
+          setQtyEditMode(null);
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setSelectedCartIdx(prev => (prev === null ? cart.length - 1 : Math.max(prev - 1, 0)));
+          setQtyEditMode(null);
+        } else if (e.key === "+" || e.key === "=") {
+          e.preventDefault();
+          if (selectedCartIdx !== null && cart[selectedCartIdx]) {
+            changeQty(cart[selectedCartIdx].product.id, 1);
+          }
+        } else if (e.key === "-" || e.key === "_") {
+          e.preventDefault();
+          if (selectedCartIdx !== null && cart[selectedCartIdx]) {
+            changeQty(cart[selectedCartIdx].product.id, -1);
+          }
+        } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+          e.preventDefault();
+          if (selectedCartIdx !== null) {
+            setQtyEditMode(prev => (prev === selectedCartIdx ? null : selectedCartIdx));
+          }
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          if (typedCode.trim()) {
+            const num = parseInt(typedCode);
+            const prod = products.find(p => p.number === num && p.active);
+            if (prod) {
+              addToCart(prod);
+              setTypedCode("");
+            } else {
+              toast({ variant: "destructive", title: "رقم الصنف غير موجود", description: `لم يتم العثور على صنف بالرقم ${num}` });
+              setTypedCode("");
+            }
+          } else if (qtyEditMode !== null) {
+            setQtyEditMode(null);
+          } else {
+            const now = Date.now();
+            if (now - lastEnterTimeRef.current < 600) {
+              handlePay();
+            } else {
+              lastEnterTimeRef.current = now;
+            }
+          }
+        }
+      } else {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (typedCode.trim()) {
+            const num = parseInt(typedCode);
+            const prod = products.find(p => p.number === num && p.active);
+            if (prod) {
+              addToCart(prod);
+              setTypedCode("");
+            } else {
+              toast({ variant: "destructive", title: "رقم الصنف غير موجود", description: `لم يتم العثور على صنف بالرقم ${num}` });
+              setTypedCode("");
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [cart, selectedCartIdx, qtyEditMode, showPayDialog, showReceipt, lastOrder, typedCode, products]);
 
   const handlePay = () => {
     if (cart.length === 0) return;
@@ -334,74 +447,84 @@ export default function Pos() {
     }
   };
 
-  // ── دالة الطباعة الرئيسية (Queue تسلسلي) ──────────────────────────
+  // ── دالة الطباعة الرئيسية (Queue تسلسلي آمن) ──────────────────────────
   const triggerDirectPrint = async (order: Order, isReprint = false, reprintReasonText?: string) => {
-    const enabledCopies = receiptCopies.filter(c => c.enabled);
-    const copiesCount = settings?.masterCopiesCount ?? 2;
-    const deptGroups = getDeptGroups(order);
+    if (isPrintingRef.current) {
+      toast({ variant: "destructive", title: "الرجاء الانتظار، جاري طباعة فاتورة حالية..." });
+      return;
+    }
+    isPrintingRef.current = true;
 
-    // ── بناء قائمة الانتظار بالترتيب ──
-    const queue: PrintJob[] = [];
+    try {
+      const enabledCopies = receiptCopies.filter(c => c.enabled);
+      const copiesCount = settings?.masterCopiesCount ?? 2;
+      const deptGroups = getDeptGroups(order);
 
-    // 1) الفاتورة الرئيسية — نسخة لكل تصنيف مفعّل
-    for (let i = 0; i < copiesCount; i++) {
-      const copyLabel = enabledCopies[i]?.label ?? `نسخة ${i + 1}`;
-      queue.push({
-        kind: "browser-master",
-        copyLabel,
-        logData: {
+      // ── بناء قائمة الانتظار بالترتيب ──
+      const queue: PrintJob[] = [];
+
+      // 1) الفاتورة الرئيسية — نسخة لكل تصنيف مفعّل
+      for (let i = 0; i < copiesCount; i++) {
+        const copyLabel = enabledCopies[i]?.label ?? `نسخة ${i + 1}`;
+        queue.push({
+          kind: "browser-master",
+          copyLabel,
+          logData: {
+            orderId: order.id,
+            invoiceNumber: order.invoiceNumber,
+            receiptType: isReprint ? "reprint" : "master",
+            departmentName: copyLabel,
+            printerName: null,
+            copies: 1,
+            status: "success",
+            reprintReason: isReprint ? (reprintReasonText ?? "إعادة طباعة") : null,
+            reprintCount: isReprint ? 1 : 0,
+          },
+        });
+      }
+
+      // 2) فاتورة مستقلة لكل قسم موجود في الطلب
+      for (const { dept, items } of deptGroups) {
+        if (!items.length) continue;
+        const logData = {
           orderId: order.id,
           invoiceNumber: order.invoiceNumber,
-          receiptType: isReprint ? "reprint" : "master",
-          departmentName: copyLabel,
-          printerName: null,
-          copies: 1,
-          status: "success",
-          reprintReason: isReprint ? (reprintReasonText ?? "إعادة طباعة") : null,
-          reprintCount: isReprint ? 1 : 0,
-        },
-      });
-    }
-
-    // 2) فاتورة مستقلة لكل قسم موجود في الطلب
-    for (const { dept, items } of deptGroups) {
-      if (!items.length) continue;
-      const logData = {
-        orderId: order.id,
-        invoiceNumber: order.invoiceNumber,
-        receiptType: "department" as const,
-        departmentName: dept.categoryName ?? "قسم",
-        printerName: dept.printerName ?? null,
-        copies: dept.copies,
-        status: "success" as const,
-        reprintCount: 0,
-      };
-      for (let c = 0; c < dept.copies; c++) {
-        if (dept.printerName) {
-          queue.push({ kind: "direct-dept", dept, items, logData });
-        } else {
-          queue.push({ kind: "browser-dept", dept, items, logData });
+          receiptType: "department" as const,
+          departmentName: dept.categoryName ?? "قسم",
+          printerName: dept.printerName ?? null,
+          copies: dept.copies,
+          status: "success" as const,
+          reprintCount: 0,
+        };
+        for (let c = 0; c < dept.copies; c++) {
+          if (dept.printerName) {
+            queue.push({ kind: "direct-dept", dept, items, logData });
+          } else {
+            queue.push({ kind: "browser-dept", dept, items, logData });
+          }
         }
       }
-    }
 
-    // ── تنفيذ Queue بالترتيب: فاتورة → انتهت → فاتورة التالية ──
-    for (let i = 0; i < queue.length; i++) {
-      const job = queue[i];
+      // ── تنفيذ Queue بالترتيب: فاتورة → انتهت → فاتورة التالية ──
+      for (let i = 0; i < queue.length; i++) {
+        const job = queue[i];
 
-      // تسجيل الطباعة
-      createPrintLog.mutate({ data: job.logData });
+        // تسجيل الطباعة
+        createPrintLog.mutate({ data: job.logData });
 
-      if (job.kind === "browser-master") {
-        await browserPrint({ type: "master", copyLabel: job.copyLabel });
-      } else if (job.kind === "browser-dept") {
-        await browserPrint({ type: "dept", dept: job.dept, items: job.items });
-      } else if (job.kind === "direct-dept") {
-        await directPrint(order, job.dept, job.items);
+        if (job.kind === "browser-master") {
+          await browserPrint({ type: "master", copyLabel: job.copyLabel });
+        } else if (job.kind === "browser-dept") {
+          await browserPrint({ type: "dept", dept: job.dept, items: job.items });
+        } else if (job.kind === "direct-dept") {
+          await directPrint(order, job.dept, job.items);
+        }
+
+        // تأخير آمن بين كل وظيفة لضمان استقرار الطابعة والمتصفح
+        if (i < queue.length - 1) await sleep(400);
       }
-
-      // تأخير قصير بين كل وظيفة لضمان الاستقرار
-      if (i < queue.length - 1) await sleep(250);
+    } finally {
+      isPrintingRef.current = false;
     }
   };
 
@@ -635,32 +758,41 @@ export default function Pos() {
                 <span>اضغط على منتج للإضافة</span>
               </div>
             )}
-            {cart.map((item, idx) => (
-              <div key={item.product.id}
-                className={cn("grid grid-cols-[1fr_40px_70px_24px] items-center px-2 py-1 gap-0.5",
-                  idx % 2 === 0 ? "bg-white" : "bg-amber-50/60")}
-              >
-                <span className="text-[11px] font-semibold text-slate-800 truncate leading-tight">{item.product.name}</span>
-                <div className="flex flex-col items-center gap-0.5">
-                  <button onClick={() => changeQty(item.product.id, 1)}
-                    className="w-5 h-4 bg-green-100 hover:bg-green-200 rounded text-green-700 flex items-center justify-center leading-none">
-                    <Plus className="w-2.5 h-2.5" />
-                  </button>
-                  <span className="text-[12px] font-extrabold text-slate-800 tabular-nums">{item.quantity}</span>
-                  <button onClick={() => changeQty(item.product.id, -1)}
-                    className="w-5 h-4 bg-red-100 hover:bg-red-200 rounded text-red-600 flex items-center justify-center leading-none">
-                    <Minus className="w-2.5 h-2.5" />
+            {cart.map((item, idx) => {
+              const isSelected = selectedCartIdx === idx;
+              const isEditingQty = qtyEditMode === idx;
+              return (
+                <div key={item.product.id}
+                  onClick={() => { setSelectedCartIdx(idx); setQtyEditMode(null); }}
+                  className={cn("grid grid-cols-[1fr_40px_70px_24px] items-center px-2 py-1 gap-0.5 cursor-pointer transition-colors",
+                    isSelected ? "bg-blue-100 border-r-4 border-blue-600 shadow-sm" : (idx % 2 === 0 ? "bg-white" : "bg-amber-50/60"))}
+                >
+                  <span className={cn("text-[11px] font-semibold truncate leading-tight", isSelected ? "text-blue-900 font-extrabold" : "text-slate-800")}>
+                    {item.product.name}
+                  </span>
+                  <div className={cn("flex flex-col items-center gap-0.5 rounded px-1 py-0.5 transition-all", isEditingQty ? "bg-amber-300 ring-2 ring-amber-600 scale-105 shadow-md" : "")}>
+                    <button onClick={(e) => { e.stopPropagation(); changeQty(item.product.id, 1); }}
+                      className="w-5 h-4 bg-green-100 hover:bg-green-200 rounded text-green-700 flex items-center justify-center leading-none">
+                      <Plus className="w-2.5 h-2.5" />
+                    </button>
+                    <span className={cn("text-[12px] font-extrabold tabular-nums", isEditingQty ? "text-amber-950 text-sm font-black underline" : "text-slate-800")}>
+                      {item.quantity}
+                    </span>
+                    <button onClick={(e) => { e.stopPropagation(); changeQty(item.product.id, -1); }}
+                      className="w-5 h-4 bg-red-100 hover:bg-red-200 rounded text-red-600 flex items-center justify-center leading-none">
+                      <Minus className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                  <span className="text-[11px] font-bold text-amber-700 text-center tabular-nums">
+                    {(item.product.price * item.quantity).toLocaleString()}
+                  </span>
+                  <button onClick={(e) => { e.stopPropagation(); removeFromCart(item.product.id); }}
+                    className="w-5 h-5 rounded hover:bg-red-100 flex items-center justify-center text-red-400">
+                    <X className="w-3 h-3" />
                   </button>
                 </div>
-                <span className="text-[11px] font-bold text-amber-700 text-center tabular-nums">
-                  {(item.product.price * item.quantity).toLocaleString()}
-                </span>
-                <button onClick={() => removeFromCart(item.product.id)}
-                  className="w-5 h-5 rounded hover:bg-red-100 flex items-center justify-center text-red-400">
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* ── Note ── */}
@@ -722,23 +854,20 @@ export default function Pos() {
         {/* ═══ MAIN: Products panel ═══ */}
         <div className="flex-1 flex flex-col overflow-hidden">
 
-          {/* ── Top bar: number input + meal mode ── */}
+          {/* ── Top bar: direct number typing info + meal mode ── */}
           <div className="bg-[#0f1e3c] border-b border-slate-700 flex items-center gap-3 px-3 py-1.5 shrink-0 flex-wrap">
             {!mealMode ? (
               <>
-                <span className="text-white/60 text-xs font-medium shrink-0">رقم الصنف:</span>
-                <Input
-                  ref={numberInputRef}
-                  type="number"
-                  placeholder="اكتب الرقم + Enter"
-                  value={numberInput}
-                  onChange={e => setNumberInput(e.target.value)}
-                  onKeyDown={handleNumberInput}
-                  className="w-40 h-7 text-sm text-center font-bold bg-white/10 border-white/20 text-white placeholder:text-white/40 focus:bg-white focus:text-slate-900"
-                  dir="ltr"
-                />
+                <span className="text-white/60 text-xs font-medium">اكتب رقم الوجبة بالكيبورد مباشرة + Enter:</span>
+                {typedCode ? (
+                  <span className="bg-amber-400 text-slate-950 font-black px-2.5 py-0.5 rounded text-sm animate-pulse tracking-wider">
+                    {typedCode} ↵
+                  </span>
+                ) : (
+                  <span className="text-amber-300 text-xs font-semibold">جاهز للاختيار</span>
+                )}
                 {cart.length > 0 && (
-                  <span className="text-amber-300 text-xs font-bold">
+                  <span className="text-amber-300 text-xs font-bold mr-2">
                     {cart.length} صنف — {total.toFixed(0)} {currency}
                   </span>
                 )}
