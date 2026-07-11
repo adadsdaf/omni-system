@@ -29,7 +29,7 @@ export default function Settings() {
   const qc = useQueryClient();
   const { toast } = useToast();
 
-  const [form, setForm] = useState<SettingsInput>({
+  const [form, setForm] = useState<any>({
     businessName: "",
     address: null,
     phone: null,
@@ -54,6 +54,7 @@ export default function Settings() {
     maxReprintCount: 3,
     masterCopiesCount: 2,
     logoUrl: null,
+    printMode: "browser",
   });
   const logoInputRef = useRef<HTMLInputElement>(null);
 
@@ -71,8 +72,8 @@ export default function Settings() {
     });
   };
 
-  const setField = (field: keyof SettingsInput, value: any) =>
-    setForm(f => ({ ...f, [field]: value }));
+  const setField = (field: string, value: any) =>
+    setForm((f: any) => ({ ...f, [field]: value }));
 
   if (isLoading) return (
     <AdminLayout>
@@ -332,6 +333,25 @@ export default function Settings() {
                       <SelectItem value="manual">يدوي فقط</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="space-y-1 pt-2 border-t">
+                  <label className="text-sm font-medium">طريقة الطباعة المفضلة للطلب</label>
+                  <Select
+                    value={form.printMode as string ?? "browser"}
+                    onValueChange={v => setField("printMode", v)}
+                  >
+                    <SelectTrigger className="w-64">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="browser">طباعة المتصفح الرسومية (بالشعار والتنسيق الكامل)</SelectItem>
+                      <SelectItem value="silent">الطباعة الصامتة المباشرة (بدون نوافذ - نصوص فقط)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed max-w-xl">
+                    تنويه: طباعة المتصفح تدعم إظهار الشعار ونفس التنسيق المبرمج بالملف بشكل مثالي، بينما الطباعة الصامتة ترسل نصوصًا خامًا مباشرة وتعتمد على إعدادات الحروف والعرض بالطابعة.
+                  </p>
                 </div>
 
                 <div className="space-y-1">
