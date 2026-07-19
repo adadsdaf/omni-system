@@ -4,7 +4,36 @@ import {
   useGetProducts, useCreateProduct, useUpdateProduct, useDeleteProduct,
   useGetCategories, getGetProductsQueryKey,
 } from "@workspace/api-client-react";
-import type { Product, ProductInput } from "@workspace/api-client-react";
+interface Product {
+  id: number;
+  number: number;
+  name: string;
+  price: number;
+  cost: number | null;
+  barcode: string | null;
+  categoryId: number | null;
+  categoryName: string | null;
+  active: boolean;
+  stock: number | null;
+  unitOfMeasure: string | null;
+  taxRate: number | null;
+  kitchenPrinter: string | null;
+}
+
+interface ProductInput {
+  name: string;
+  number: number;
+  price: number;
+  cost: number | null;
+  barcode: string | null;
+  categoryId: number | null;
+  active: boolean;
+  stock: number | null;
+  unitOfMeasure: string | null;
+  taxRate: number | null;
+  kitchenPrinter: string | null;
+}
+
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +43,19 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Plus, Search, Pencil, Trash2 } from "lucide-react";
 
-const emptyForm = (): ProductInput => ({ name: "", number: 0, price: 0, cost: null, barcode: null, categoryId: null, active: true, stock: null });
+const emptyForm = (): ProductInput => ({
+  name: "",
+  number: 0,
+  price: 0,
+  cost: null,
+  barcode: null,
+  categoryId: null,
+  active: true,
+  stock: 0,
+  unitOfMeasure: null,
+  taxRate: null,
+  kitchenPrinter: null,
+});
 
 export default function Products() {
   const [search, setSearch] = useState("");
@@ -25,18 +66,57 @@ export default function Products() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { data: products, isLoading } = useGetProducts({ search: search || undefined });
+  const { data: productsData, isLoading } = useGetProducts({ search: search || undefined });
+  const products = productsData as unknown as Product[] | undefined;
   const { data: categories = [] } = useGetCategories();
-  const createMutation = useCreateProduct();
-  const updateMutation = useUpdateProduct();
-  const deleteMutation = useDeleteProduct();
+  const createMutation = useCreateProduct() as any;
+  const updateMutation = useUpdateProduct() as any;
+  const deleteMutation = useDeleteProduct() as any;
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: getGetProductsQueryKey() });
 
-  const openAdd = () => { setEditing(null); setForm(emptyForm()); setShowDialog(true); };
+  const openAdd = async () => {
+    setEditing(null);
+    let nextNum = 1;
+    try {
+      const res = await fetch("/api/products/next-number");
+      if (res.ok) {
+        const data = await res.json();
+        nextNum = data.nextNumber;
+      }
+    } catch (e) {
+      console.error("Failed to fetch next product number:", e);
+    }
+    setForm({
+      name: "",
+      number: nextNum,
+      price: 0,
+      cost: null,
+      barcode: null,
+      categoryId: null,
+      active: true,
+      stock: 0,
+      unitOfMeasure: null,
+      taxRate: null,
+      kitchenPrinter: null,
+    });
+    setShowDialog(true);
+  };
   const openEdit = (p: Product) => {
     setEditing(p);
-    setForm({ name: p.name, number: p.number, price: p.price, cost: p.cost ?? null, barcode: p.barcode ?? null, categoryId: p.categoryId ?? null, active: p.active, stock: p.stock ?? null });
+    setForm({
+      name: p.name,
+      number: p.number,
+      price: p.price,
+      cost: p.cost ?? null,
+      barcode: p.barcode ?? null,
+      categoryId: p.categoryId ?? null,
+      active: p.active,
+      stock: p.stock ?? 0,
+      unitOfMeasure: p.unitOfMeasure ?? null,
+      taxRate: p.taxRate ?? null,
+      kitchenPrinter: p.kitchenPrinter ?? null,
+    });
     setShowDialog(true);
   };
 
@@ -96,6 +176,9 @@ export default function Products() {
                 <th className="text-right p-3 font-semibold">التصنيف</th>
                 <th className="text-left p-3 font-semibold">السعر</th>
                 <th className="text-left p-3 font-semibold">التكلفة</th>
+                <th className="text-left p-3 font-semibold">الوحدة</th>
+                <th className="text-left p-3 font-semibold">الضريبة</th>
+                <th className="text-right p-3 font-semibold">قسم المطبخ</th>
                 <th className="text-right p-3 font-semibold">الحالة</th>
                 <th className="p-3"></th>
               </tr>
@@ -103,13 +186,13 @@ export default function Products() {
             <tbody className="divide-y divide-border">
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-8">
+                  <td colSpan={10} className="text-center py-8">
                     <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary" />
                   </td>
                 </tr>
               ) : products?.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-8 text-muted-foreground">لا توجد منتجات</td>
+                  <td colSpan={10} className="text-center py-8 text-muted-foreground">لا توجد منتجات</td>
                 </tr>
               ) : (
                 products?.map((product) => (
@@ -119,6 +202,9 @@ export default function Products() {
                     <td className="p-3 text-muted-foreground">{product.categoryName ?? "-"}</td>
                     <td className="p-3 text-left font-bold text-amber-600">{product.price.toFixed(2)}</td>
                     <td className="p-3 text-left text-muted-foreground">{product.cost?.toFixed(2) ?? "-"}</td>
+                    <td className="p-3 text-left text-muted-foreground">{product.unitOfMeasure ?? "-"}</td>
+                    <td className="p-3 text-left text-muted-foreground">{product.taxRate ? `${product.taxRate}%` : "-"}</td>
+                    <td className="p-3 text-right text-muted-foreground">{product.kitchenPrinter ?? "-"}</td>
                     <td className="p-3">
                       <Badge variant={product.active ? "outline" : "secondary"} className={product.active ? "text-green-600 border-green-600" : ""}>
                         {product.active ? "نشط" : "غير نشط"}
@@ -174,8 +260,20 @@ export default function Products() {
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-sm font-medium">المخزون</label>
+              <label className="text-sm font-medium">المخزون (اختياري)</label>
               <Input type="number" value={form.stock ?? ""} onChange={e => setForm({ ...form, stock: e.target.value ? parseInt(e.target.value) : null })} dir="ltr" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium">وحدة القياس (اختياري)</label>
+              <Input placeholder="مثال: حبة، علبة، كجم" value={form.unitOfMeasure ?? ""} onChange={e => setForm({ ...form, unitOfMeasure: e.target.value || null })} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium">الضريبة % (اختياري)</label>
+              <Input type="number" step="0.1" placeholder="مثال: 15" value={form.taxRate ?? ""} onChange={e => setForm({ ...form, taxRate: e.target.value ? parseFloat(e.target.value) : null })} dir="ltr" />
+            </div>
+            <div className="space-y-1 col-span-2">
+              <label className="text-sm font-medium">قسم المطبخ / طابعة الطلبات (اختياري)</label>
+              <Input placeholder="مثال: طابعة المطبخ، طابعة المشروبات" value={form.kitchenPrinter ?? ""} onChange={e => setForm({ ...form, kitchenPrinter: e.target.value || null })} />
             </div>
             <div className="flex items-center gap-3 mt-4">
               <label className="text-sm font-medium">نشط</label>

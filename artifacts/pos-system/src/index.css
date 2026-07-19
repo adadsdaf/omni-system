@@ -192,7 +192,7 @@
   .hidden-print-container {
     display: block !important;
     visibility: visible !important;
-    position: fixed !important;
+    position: absolute !important;
     top: 0 !important;
     left: 0 !important;
     right: 0 !important;
@@ -201,6 +201,7 @@
     padding: 0 !important;
     background: white !important;
     z-index: 99999 !important;
+    box-sizing: border-box !important;
   }
 
   .hidden-print-container *,
@@ -218,14 +219,15 @@
     break-after: page !important;
     page-break-inside: avoid !important;
     width: 80mm !important;
-    margin: 0 !important;
+    margin: 0 auto !important;
     padding: 0 !important;
     background: white !important;
+    box-sizing: border-box !important;
   }
 
   .print-page:last-child {
-    page-break-after: auto !important;
-    break-after: auto !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
   }
 
   /* تأكيد ظهور الخطوط الفاصلة */
@@ -245,14 +247,14 @@
 
 .receipt-slip {
   font-family: 'Tajawal', Arial, sans-serif;
-  font-size: 12px;
+  font-size: 11px;
   direction: rtl;
   text-align: right;
   color: #000;
   width: 100%;
   background: white;
-  line-height: 1.45;
-  padding: 3mm 4mm 6mm 4mm;
+  line-height: 1.25;
+  padding: 0.5mm 1.5mm; /* Extremely tight padding to reduce vertical paper usage */
   box-sizing: border-box;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -261,67 +263,68 @@
 
 .receipt-header {
   text-align: center;
-  margin-bottom: 4px;
+  margin-bottom: 1px;
 }
 
 .receipt-business-name {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 900;
   text-align: center;
-  letter-spacing: 0.5px;
-  margin-bottom: 2px;
+  letter-spacing: 0.2px;
+  margin-bottom: 0.5px;
 }
 
 .receipt-copy-label {
-  font-size: 10px;
-  color: #555;
+  font-size: 8.5px;
+  color: #333;
   text-align: center;
-  margin-bottom: 2px;
+  margin-bottom: 0.5px;
 }
 
 .receipt-dept-title {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: bold;
   text-align: center;
   background: transparent;
   color: #000;
-  padding: 2px 4px;
-  margin: 4px 0;
-  border-bottom: 2px solid #000;
+  padding: 0.5px 2px;
+  margin: 1px 0;
+  border-bottom: 1.5px solid #000;
 }
 
 .receipt-sub {
-  font-size: 10px;
-  color: #444;
+  font-size: 8.5px;
+  color: #333;
   text-align: center;
 }
 
 .receipt-divider-dots {
   border-top: 1px dashed #000;
-  margin: 4px 0;
+  margin: 1.5px 0;
 }
 
 .receipt-divider-solid {
   border-top: 1px solid #000;
-  margin: 4px 0;
+  margin: 1.5px 0;
 }
 
 .receipt-divider-double {
-  border-top: 3px double #000;
-  margin: 4px 0;
+  border-top: 2.5px double #000;
+  margin: 1.5px 0;
 }
 
 .receipt-title-row {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin: 3px 0;
+  align-items: center;
+  margin: 2px 0;
   gap: 4px;
 }
 
 .receipt-time-label {
   font-size: 10px;
-  color: #333;
+  color: #000;
+  font-weight: bold;
   white-space: nowrap;
 }
 
@@ -331,7 +334,7 @@
 }
 
 .receipt-invoice-title-text {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: bold;
   text-decoration: underline;
 }
@@ -346,6 +349,7 @@
 .receipt-order-type {
   text-align: center;
   font-size: 11px;
+  font-weight: bold;
   margin: 1px 0;
 }
 
@@ -358,64 +362,64 @@
   gap: 4px;
 }
 
+/* Table grid borders styled to match the uploaded photo */
 .receipt-table {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
   font-size: 11px;
+  border: 1px solid #000; /* Outer border */
+}
+
+.receipt-table th,
+.receipt-table td {
+  border: 1px solid #000; /* Grid lines exactly like the picture */
+  padding: 1.5px 3px;
+  vertical-align: middle;
 }
 
 .receipt-table thead tr {
-  border-bottom: 1px solid #000;
-}
-
-.receipt-table tbody tr {
-  border-bottom: 1px dashed #ccc;
+  background-color: #f3f4f6;
+  border-bottom: 1.5px solid #000;
 }
 
 .receipt-th-item {
   text-align: right;
-  padding: 2px 0;
   font-weight: bold;
   width: 55%;
-  overflow: hidden;
 }
 
 .receipt-th-qty {
   text-align: center;
-  padding: 2px 2px;
   font-weight: bold;
   width: 15%;
 }
 
 .receipt-th-price {
   text-align: left;
-  padding: 2px 2px;
   font-weight: bold;
   width: 30%;
   direction: ltr;
   unicode-bidi: embed;
 }
 
+/* Wrap names completely (اسم الصنف ظاهر كامل) */
 .receipt-td-item {
   text-align: right;
-  padding: 2px 0;
   width: 55%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 0;
+  white-space: normal !important;
+  word-wrap: break-word !important;
+  overflow: visible !important;
 }
 
 .receipt-td-qty {
   text-align: center;
-  padding: 2px 2px;
   width: 15%;
+  font-weight: bold;
 }
 
 .receipt-td-price {
   text-align: left;
-  padding: 2px 2px;
   width: 30%;
   font-variant-numeric: tabular-nums;
   direction: ltr;
@@ -426,14 +430,14 @@
 
 .receipt-table-dept .receipt-td-qty-big {
   text-align: center;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 900;
-  padding: 3px 0;
+  padding: 2px 0;
   width: 40px;
 }
 
 .receipt-totals {
-  margin: 3px 0;
+  margin: 2px 0;
   font-size: 11px;
 }
 
@@ -443,14 +447,17 @@
   margin: 1px 0;
 }
 
+/* Polished total box that aligns perfectly below the table grid */
 .receipt-grand-total {
   display: flex;
   justify-content: space-between;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 900;
-  border-top: 2px solid #000;
-  margin-top: 3px;
-  padding-top: 3px;
+  border: 1px solid #000;
+  border-top: none; /* Merges with the bottom of the table */
+  margin-top: 0;
+  padding: 2px 4px;
+  background-color: #f3f4f6; /* Shaded total box like the image */
 }
 
 .receipt-grand-total span:last-child,
@@ -463,52 +470,55 @@
 
 .receipt-cashier {
   text-align: center;
-  font-size: 11px;
-  margin: 4px 0;
-  padding: 3px 0;
-  border-top: 1px dashed #ccc;
+  font-size: 10.5px;
+  margin: 1.5px 0;
+  padding: 1px 3px;
+  background-color: #f3f4f6; /* Shaded banner like the image */
+  border: 1px solid #000;
+  font-weight: bold;
 }
 
 .receipt-notes-box {
-  border: 1px solid #ccc;
-  border-radius: 2px;
-  padding: 3px 5px;
-  margin: 4px 0;
-  background: #f9f9f9;
+  border: 1px solid #000;
+  border-radius: 1px;
+  padding: 1px 3px;
+  margin: 1.5px 0;
+  background: #f3f4f6; /* Shaded box */
+  text-align: right;
 }
 
 .receipt-notes-label {
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: bold;
   color: #555;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 
 .receipt-notes-text {
-  font-size: 11px;
+  font-size: 10.5px;
 }
 
 .receipt-footer-msg {
   text-align: center;
-  font-size: 10px;
+  font-size: 9.5px;
   color: #333;
-  margin: 3px 0;
+  margin: 1.5px 0;
 }
 
 .receipt-no-return {
   text-align: center;
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: bold;
   border: 1px solid #000;
-  padding: 2px;
-  margin: 4px 0;
+  padding: 1px;
+  margin: 2px 0;
 }
 
 .receipt-contact {
   text-align: center;
-  font-size: 10px;
+  font-size: 9.5px;
   color: #333;
-  margin: 2px 0;
+  margin: 1px 0;
 }
 
 /* ─── Logo in main receipt ──────────────────────── */
@@ -587,40 +597,42 @@
 .dept-slip-table {
   width: 100%;
   border-collapse: collapse;
-  margin: 2px 0;
+  table-layout: fixed;
+  font-size: 11px;
+  border: 1px solid #000;
+  margin: 3px 0;
 }
 
-.dept-slip-th-row {
-  border-bottom: 1px solid #000;
+.dept-slip-table th,
+.dept-slip-table td {
+  border: 1px solid #000;
+  padding: 3px 4px;
+  vertical-align: middle;
+}
+
+.dept-slip-table thead tr {
+  background-color: #f3f4f6;
+  border-bottom: 1.5px solid #000;
 }
 
 .dept-slip-th-name {
   text-align: right;
-  font-size: 11px;
-  padding: 2px 2px;
   font-weight: bold;
+  width: 55%;
 }
 
 .dept-slip-th-qty {
   text-align: center;
-  font-size: 11px;
-  padding: 2px 0;
   font-weight: bold;
-  width: 40px;
+  width: 15%;
 }
 
 .dept-slip-th-price {
   text-align: left;
-  font-size: 11px;
-  padding: 2px 4px;
   font-weight: bold;
-  width: 60px;
+  width: 30%;
   direction: ltr;
   unicode-bidi: embed;
-}
-
-.dept-slip-item-row {
-  border-bottom: 1px dashed #ccc;
 }
 
 .dept-slip-item-name {
@@ -628,6 +640,9 @@
   font-weight: bold;
   padding: 3px 2px;
   text-align: right;
+  white-space: normal !important;
+  word-wrap: break-word !important;
+  overflow: visible !important;
 }
 
 .dept-slip-item-qty {
@@ -635,14 +650,12 @@
   font-weight: 900;
   text-align: center;
   padding: 3px 0;
-  width: 40px;
 }
 
 .dept-slip-item-price {
   font-size: 12px;
   text-align: left;
   padding: 4px 4px;
-  width: 60px;
   font-variant-numeric: tabular-nums;
   direction: ltr;
   unicode-bidi: embed;

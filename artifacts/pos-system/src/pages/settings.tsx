@@ -7,7 +7,24 @@ import {
   useGetCategories, useGetPrintersList,
   useGetPrinterSettings, useUpdatePrinterSettings, getGetPrinterSettingsQueryKey,
 } from "@workspace/api-client-react";
-import type { SettingsInput, ReceiptCopyConfig, DepartmentPrintConfig, PrinterSettingsInput } from "@workspace/api-client-react";
+import type { SettingsInput, PrinterSettingsInput } from "@workspace/api-client-react";
+
+interface AppReceiptCopyConfig {
+  id: number;
+  copyNumber: number;
+  label: string;
+  enabled: boolean;
+}
+
+interface AppDepartmentPrintConfig {
+  id: number;
+  categoryId: number | null;
+  categoryName: string | null;
+  printerName: string | null;
+  copies: number;
+  enabled: boolean;
+  printOrder: number;
+}
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,17 +36,19 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Save, Plus, Trash2, Pencil, Printer, Copy, Building2, Settings2, Upload, X } from "lucide-react";
+import { useAuth } from "@/components/auth-provider";
 
 // ─────────────────────────────────────────────
 // Main Settings Component
 // ─────────────────────────────────────────────
 export default function Settings() {
+  const { user } = useAuth();
   const { data: settings, isLoading } = useGetSettings();
   const updateMutation = useUpdateSettings();
   const qc = useQueryClient();
   const { toast } = useToast();
 
-  const [form, setForm] = useState<SettingsInput>({
+  const [form, setForm] = useState<any>({
     businessName: "",
     address: null,
     phone: null,
@@ -54,8 +73,11 @@ export default function Settings() {
     maxReprintCount: 3,
     masterCopiesCount: 2,
     logoUrl: null,
+    printMode: "browser",
+    systemLogoUrl: null,
   });
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const systemLogoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (settings) setForm({ ...form, ...settings });
@@ -71,8 +93,8 @@ export default function Settings() {
     });
   };
 
-  const setField = (field: keyof SettingsInput, value: any) =>
-    setForm(f => ({ ...f, [field]: value }));
+  const setField = (field: string, value: any) =>
+    setForm((f: any) => ({ ...f, [field]: value }));
 
   if (isLoading) return (
     <AdminLayout>
@@ -128,8 +150,8 @@ export default function Settings() {
                   ["phone", "رقم الهاتف"],
                   ["taxNumber", "الرقم الضريبي"],
                   ["currency", "العملة"],
-                ] as [keyof SettingsInput, string][]).map(([field, label]) => (
-                  <div key={field} className="space-y-1">
+                ] as [string, string][]).map(([field, label]) => (
+                  <div key={field as string} className="space-y-1">
                     <label className="text-sm font-medium">{label}</label>
                     <Input
                       value={(form[field] as string) ?? ""}
@@ -185,6 +207,13 @@ export default function Settings() {
                         ctx.drawImage(img, 0, 0, w, h);
                         const compressed = canvas.toDataURL("image/jpeg", 0.75);
                         setField("logoUrl", compressed);
+                         updateMutation.mutate({ data: { ...form, logoUrl: compressed } }, {
+                           onSuccess: () => {
+                             qc.invalidateQueries({ queryKey: getGetSettingsQueryKey() });
+                             toast({ title: "تم رفع الشعار وحفظ الإعدادات بنجاح" });
+                           },
+                           onError: () => toast({ variant: "destructive", title: "فشل في حفظ الشعار" })
+                         });
                         toast({ title: "تم رفع الشعار", description: `${Math.round(compressed.length / 1024)}KB` });
                       };
                       img.src = ev.target?.result as string;
@@ -202,7 +231,15 @@ export default function Settings() {
                         <Upload className="w-3.5 h-3.5" />
                         تغيير الشعار
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => setField("logoUrl", null)} className="gap-2 text-red-600 hover:text-red-700">
+                      <Button variant="outline" size="sm" onClick={() => {
+                        setField("logoUrl", null);
+                        updateMutation.mutate({ data: { ...form, logoUrl: null } }, {
+                          onSuccess: () => {
+                            qc.invalidateQueries({ queryKey: getGetSettingsQueryKey() });
+                            toast({ title: "تم حذف الشعار بنجاح" });
+                          }
+                        });
+                      }} className="gap-2 text-red-600 hover:text-red-700">
                         <X className="w-3.5 h-3.5" />
                         حذف الشعار
                       </Button>
@@ -221,6 +258,99 @@ export default function Settings() {
                 )}
               </CardContent>
             </Card>
+
+            {user?.role === "developer" && (
+              <Card className="border-2 border-dashed border-amber-500 bg-amber-500/5">
+                <CardHeader>
+                  <CardTitle className="text-amber-600 flex items-center gap-2">
+                    <Building2 className="w-5 h-5" />
+                    شعار النظام الأساسي (خاص بمطور النظام فقط)
+                  </CardTitle>
+                  <CardDescription className="text-amber-700/80 font-semibold">
+                    هذه الميزة مخصصة لمطور النظام فقط لتغيير الشعار الرئيسي للنظام بالكامل (شاشة تسجيل الدخول والقائمة الجانبية). لا تظهر هذه البطاقة لأي مستخدم آخر.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <input
+                    ref={systemLogoInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      if (file.size > 5 * 1024 * 1024) {
+                        toast({ variant: "destructive", title: "حجم الصورة كبير جداً", description: "الحد الأقصى 5MB" });
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onload = ev => {
+                        const img = new Image();
+                        img.onload = () => {
+                          const canvas = document.createElement("canvas");
+                          const MAX = 400;
+                          let w = img.width, h = img.height;
+                          if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+                          if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+                          canvas.width = w; canvas.height = h;
+                          const ctx = canvas.getContext("2d")!;
+                          ctx.fillStyle = "#fff";
+                          ctx.fillRect(0, 0, w, h);
+                          ctx.drawImage(img, 0, 0, w, h);
+                          const compressed = canvas.toDataURL("image/jpeg", 0.75);
+                          setField("systemLogoUrl", compressed);
+                          updateMutation.mutate({ data: { ...form, systemLogoUrl: compressed } }, {
+                            onSuccess: () => {
+                              qc.invalidateQueries({ queryKey: getGetSettingsQueryKey() });
+                              toast({ title: "تم رفع شعار النظام بنجاح" });
+                            },
+                            onError: () => toast({ variant: "destructive", title: "فشل في حفظ شعار النظام" })
+                          });
+                          toast({ title: "تم رفع شعار النظام الجديد", description: `${Math.round(compressed.length / 1024)}KB` });
+                        };
+                        img.src = ev.target?.result as string;
+                      };
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+                  {form.systemLogoUrl ? (
+                    <div className="flex items-center gap-4">
+                      <div className="border border-amber-300 rounded-lg p-2 bg-white flex items-center justify-center w-32 h-20 shadow-sm">
+                        <img src={form.systemLogoUrl as string} alt="شعار النظام" className="max-w-full max-h-full object-contain" />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Button type="button" variant="outline" size="sm" onClick={() => systemLogoInputRef.current?.click()} className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50">
+                          <Upload className="w-3.5 h-3.5" />
+                          تغيير شعار النظام
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => {
+                          setField("systemLogoUrl", null);
+                          updateMutation.mutate({ data: { ...form, systemLogoUrl: null } }, {
+                            onSuccess: () => {
+                              qc.invalidateQueries({ queryKey: getGetSettingsQueryKey() });
+                              toast({ title: "تم حذف شعار النظام والعودة للشعار الافتراضي" });
+                            }
+                          });
+                        }} className="gap-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200">
+                          <X className="w-3.5 h-3.5" />
+                          حذف الشعار (افتراضي)
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => systemLogoInputRef.current?.click()}
+                      className="w-full border-2 border-dashed border-amber-300 rounded-lg p-6 text-center hover:border-amber-500 hover:bg-amber-50/50 transition-colors cursor-pointer"
+                    >
+                      <Upload className="w-8 h-8 mx-auto mb-2 text-amber-500" />
+                      <p className="text-sm font-medium text-amber-950">انقر لرفع شعار النظام الأساسي</p>
+                      <p className="text-xs text-amber-600/80 mt-1">PNG، JPG — الحد الأقصى 5MB (متاح فقط للمطور)</p>
+                    </button>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             <Card>
               <CardHeader>
@@ -283,8 +413,8 @@ export default function Settings() {
                     ["showTax", "إظهار الضريبة"],
                     ["showDiscount", "إظهار الخصم"],
                     ["showNotes", "إظهار الملاحظات"],
-                  ] as [keyof SettingsInput, string][]).map(([field, label]) => (
-                    <div key={field} className="flex items-center justify-between py-1.5 border-b border-border/50">
+                  ] as [string, string][]).map(([field, label]) => (
+                    <div key={field as string} className="flex items-center justify-between py-1.5 border-b border-border/50">
                       <label className="text-sm">{label}</label>
                       <Switch
                         checked={Boolean(form[field])}
@@ -317,6 +447,25 @@ export default function Settings() {
                       <SelectItem value="manual">يدوي فقط</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="space-y-1 pt-2 border-t">
+                  <label className="text-sm font-medium">طريقة الطباعة المفضلة للطلب</label>
+                  <Select
+                    value={form.printMode as string ?? "browser"}
+                    onValueChange={v => setField("printMode", v)}
+                  >
+                    <SelectTrigger className="w-64">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="browser">طباعة المتصفح الرسومية (بالشعار والتنسيق الكامل)</SelectItem>
+                      <SelectItem value="silent">الطباعة الصامتة المباشرة (بدون نوافذ - نصوص فقط)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed max-w-xl">
+                    تنويه: طباعة المتصفح تدعم إظهار الشعار ونفس التنسيق المبرمج بالملف بشكل مثالي، بينما الطباعة الصامتة ترسل نصوصًا خامًا مباشرة وتعتمد على إعدادات الحروف والعرض بالطابعة.
+                  </p>
                 </div>
 
                 <div className="space-y-1">
@@ -374,28 +523,29 @@ function MasterCopiesTab({
   onSave: () => void;
   isSaving: boolean;
 }) {
-  const { data: copies = [], isLoading } = useGetReceiptCopyConfigs();
+  const { data: copiesData = [], isLoading } = useGetReceiptCopyConfigs();
+  const copies = copiesData as unknown as AppReceiptCopyConfig[];
   const updateCopy = useUpdateReceiptCopyConfig();
   const createCopy = useCreateReceiptCopyConfig();
   const deleteCopy = useDeleteReceiptCopyConfig();
   const qc = useQueryClient();
   const { toast } = useToast();
 
-  const [editItem, setEditItem] = useState<ReceiptCopyConfig | null>(null);
+  const [editItem, setEditItem] = useState<AppReceiptCopyConfig | null>(null);
   const [editLabel, setEditLabel] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [newEnabled, setNewEnabled] = useState(true);
 
-  const handleToggle = (item: ReceiptCopyConfig) => {
-    updateCopy.mutate({ id: item.id, data: { copyNumber: item.copyNumber, label: item.label, enabled: !item.enabled } }, {
+  const handleToggle = (item: AppReceiptCopyConfig) => {
+    updateCopy.mutate({ id: item.id, data: { copyNumber: item.copyNumber, label: item.label, enabled: !item.enabled } as any }, {
       onSuccess: () => qc.invalidateQueries({ queryKey: getGetReceiptCopyConfigsQueryKey() }),
     });
   };
 
   const handleEditSave = () => {
     if (!editItem) return;
-    updateCopy.mutate({ id: editItem.id, data: { copyNumber: editItem.copyNumber, label: editLabel, enabled: editItem.enabled } }, {
+    updateCopy.mutate({ id: editItem.id, data: { copyNumber: editItem.copyNumber, label: editLabel, enabled: editItem.enabled } as any }, {
       onSuccess: () => {
         qc.invalidateQueries({ queryKey: getGetReceiptCopyConfigsQueryKey() });
         setEditItem(null);
@@ -407,7 +557,7 @@ function MasterCopiesTab({
   const handleAdd = () => {
     if (!newLabel.trim()) return;
     const nextNum = copies.length > 0 ? Math.max(...copies.map(c => c.copyNumber)) + 1 : 1;
-    createCopy.mutate({ data: { copyNumber: nextNum, label: newLabel.trim(), enabled: newEnabled } }, {
+    createCopy.mutate({ data: { copyNumber: nextNum, label: newLabel.trim(), enabled: newEnabled } as any }, {
       onSuccess: () => {
         qc.invalidateQueries({ queryKey: getGetReceiptCopyConfigsQueryKey() });
         setShowAdd(false);
@@ -545,21 +695,22 @@ function MasterCopiesTab({
 // Departments Tab
 // ─────────────────────────────────────────────
 function DepartmentsTab() {
-  const { data: depts = [], isLoading } = useGetDepartmentPrintConfigs();
+  const { data: deptsData = [], isLoading } = useGetDepartmentPrintConfigs();
+  const depts = deptsData as unknown as AppDepartmentPrintConfig[];
   const { data: categories = [] } = useGetCategories();
   const { data: systemPrinters = [] } = useGetPrintersList();
-  const updateDept = useUpdateDepartmentPrintConfig();
-  const createDept = useCreateDepartmentPrintConfig();
-  const deleteDept = useDeleteDepartmentPrintConfig();
+  const updateDept = useUpdateDepartmentPrintConfig() as any;
+  const createDept = useCreateDepartmentPrintConfig() as any;
+  const deleteDept = useDeleteDepartmentPrintConfig() as any;
   const qc = useQueryClient();
   const { toast } = useToast();
 
-  const [editItem, setEditItem] = useState<DepartmentPrintConfig | null>(null);
+  const [editItem, setEditItem] = useState<AppDepartmentPrintConfig | null>(null);
   const [editForm, setEditForm] = useState({ categoryId: "", printerName: "", copies: 1, enabled: true, printOrder: 0 });
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState({ categoryId: "", printerName: "", copies: 1, enabled: true, printOrder: 0 });
 
-  const openEdit = (item: DepartmentPrintConfig) => {
+  const openEdit = (item: AppDepartmentPrintConfig) => {
     setEditItem(item);
     setEditForm({
       categoryId: item.categoryId ? String(item.categoryId) : "",
@@ -609,7 +760,7 @@ function DepartmentsTab() {
     });
   };
 
-  const handleToggle = (item: DepartmentPrintConfig) => {
+  const handleToggle = (item: AppDepartmentPrintConfig) => {
     updateDept.mutate({
       id: item.id,
       data: {
@@ -780,19 +931,19 @@ function PrinterLayoutTab() {
   const updateMutation = useUpdatePrinterSettings();
 
   const defaults: PrinterSettingsInput & { mainPrinterName?: string | null } = {
-    paperWidth: 80, leftMargin: 4, rightMargin: 4,
+    paperWidth: 80 as any, leftMargin: 4, rightMargin: 4,
     topMargin: 2, bottomMargin: 2, fontSize: 10,
     lineSpacing: 2, charactersPerLine: 48, mainPrinterName: null,
   };
 
-  const [form, setForm] = useState<PrinterSettingsInput & { mainPrinterName?: string | null }>(defaults);
+  const [form, setForm] = useState<any>(defaults);
 
   useEffect(() => {
     if (saved) setForm({ ...defaults, ...(saved as any) });
   }, [saved]);
 
   const set = (k: string, v: number | string | null) =>
-    setForm(f => ({ ...f, [k]: v }));
+    setForm((f: any) => ({ ...f, [k]: v }));
 
   const handleSave = () => {
     updateMutation.mutate({ data: form }, {
@@ -804,7 +955,7 @@ function PrinterLayoutTab() {
     });
   };
 
-  const handleTestPrint = () => {
+  const handleTestPrint = async () => {
     const lm = form.leftMargin ?? 4;
     const rm = form.rightMargin ?? 4;
     const pw = form.paperWidth ?? 80;
@@ -814,18 +965,35 @@ function PrinterLayoutTab() {
     const style = document.createElement("style");
     style.id = "__test-print-style__";
     style.textContent = `
-      @page { size: ${pw}mm auto; margin: 0; }
+      @page { size: ${pw}mm auto; margin: 0 !important; }
+      .hidden-print-container, .print-page {
+        width: ${pw}mm !important;
+        box-sizing: border-box !important;
+      }
       .receipt-slip {
         font-size: ${fs}px !important;
         padding: ${tm}mm ${rm}mm ${bm}mm ${lm}mm !important;
+        width: ${pw}mm !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
       }
     `;
     document.head.appendChild(style);
-    window.print();
+    const electronAPI = (window as any).electronAPI;
+    if (electronAPI && electronAPI.isElectron) {
+      try {
+        await electronAPI.printSilent(form.mainPrinterName || "");
+      } catch (err) {
+        console.error("Electron silent printing failed:", err);
+        window.print();
+      }
+    } else {
+      window.print();
+    }
     document.getElementById("__test-print-style__")?.remove();
   };
 
-  const numField = (label: string, key: keyof PrinterSettingsInput, unit = "mm", min = 0, max = 99, step = 0.5) => (
+  const numField = (label: string, key: string, unit = "mm", min = 0, max = 99, step = 0.5) => (
     <div className="flex items-center justify-between py-3 border-b last:border-0">
       <span className="text-sm font-medium">{label}</span>
       <div className="flex items-center gap-2">
@@ -855,7 +1023,7 @@ function PrinterLayoutTab() {
                 type="radio"
                 name="paperWidth"
                 value={w}
-                checked={(form.paperWidth ?? 80) === w}
+                checked={Number(form.paperWidth ?? 80) === w}
                 onChange={() => set("paperWidth", w)}
                 className="w-4 h-4 accent-primary"
               />
@@ -870,14 +1038,14 @@ function PrinterLayoutTab() {
           <CardTitle>الهوامش</CardTitle>
           <CardDescription>
             عرض المحتوى = {form.paperWidth ?? 80}mm − {form.leftMargin ?? 4}mm − {form.rightMargin ?? 4}mm ={" "}
-            <strong>{(form.paperWidth ?? 80) - (form.leftMargin ?? 4) - (form.rightMargin ?? 4)}mm</strong>
+            <strong>{Number(form.paperWidth ?? 80) - Number(form.leftMargin ?? 4) - Number(form.rightMargin ?? 4)}mm</strong>
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0 px-6">
-          {numField("الهامش الأيسر", "leftMargin", "mm", 0, 20)}
-          {numField("الهامش الأيمن", "rightMargin", "mm", 0, 20)}
-          {numField("الهامش العلوي", "topMargin", "mm", 0, 20)}
-          {numField("الهامش السفلي", "bottomMargin", "mm", 0, 20)}
+          {numField("الهامش الأيسر", "leftMargin", "mm", 0, 20, 0.1)}
+          {numField("الهامش الأيمن", "rightMargin", "mm", 0, 20, 0.1)}
+          {numField("الهامش العلوي", "topMargin", "mm", 0, 20, 0.1)}
+          {numField("الهامش السفلي", "bottomMargin", "mm", 0, 20, 0.1)}
         </CardContent>
       </Card>
 

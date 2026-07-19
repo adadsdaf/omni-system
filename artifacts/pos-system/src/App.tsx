@@ -17,6 +17,16 @@ import Settings from "@/pages/settings";
 import PrintLog from "@/pages/print-log";
 import HR from "@/pages/hr";
 import Returns from "@/pages/returns";
+import Accounting from "@/pages/accounting";
+import BranchesPage from "@/pages/branches";
+import SuppliersPage from "@/pages/suppliers";
+import ShiftsPage from "@/pages/shifts";
+import TablesPage from "@/pages/tables";
+import ExpensesPage from "@/pages/expenses";
+import LicensesPage from "@/pages/licenses";
+import AuditPage from "@/pages/audit";
+import DocumentPrintSettingsPage from "@/pages/document-print-settings";
+import InventoryPage from "@/pages/inventory";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,16 +54,16 @@ function Router() {
         <ProtectedRoute requireAdmin><Categories /></ProtectedRoute>
       </Route>
       <Route path="/orders">
-        <ProtectedRoute requireAdmin><Orders /></ProtectedRoute>
+        <ProtectedRoute allowedRoles={["admin", "developer", "accountant"]}><Orders /></ProtectedRoute>
       </Route>
       <Route path="/customers">
-        <ProtectedRoute requireAdmin><Customers /></ProtectedRoute>
+        <ProtectedRoute allowedRoles={["admin", "developer", "accountant"]}><Customers /></ProtectedRoute>
       </Route>
       <Route path="/users">
         <ProtectedRoute requireAdmin><Users /></ProtectedRoute>
       </Route>
       <Route path="/reports">
-        <ProtectedRoute requireAdmin><Reports /></ProtectedRoute>
+        <ProtectedRoute allowedRoles={["admin", "developer", "accountant"]}><Reports /></ProtectedRoute>
       </Route>
       <Route path="/settings">
         <ProtectedRoute requireAdmin><Settings /></ProtectedRoute>
@@ -64,8 +74,38 @@ function Router() {
       <Route path="/hr">
         <ProtectedRoute requireAdmin><HR /></ProtectedRoute>
       </Route>
+      <Route path="/accounting">
+        <ProtectedRoute allowedRoles={["admin", "developer", "accountant"]}><Accounting /></ProtectedRoute>
+      </Route>
       <Route path="/returns">
-        <ProtectedRoute requireAdmin><Returns /></ProtectedRoute>
+        <ProtectedRoute allowedRoles={["admin", "developer", "accountant"]}><Returns /></ProtectedRoute>
+      </Route>
+      <Route path="/branches">
+        <ProtectedRoute requireAdmin><BranchesPage /></ProtectedRoute>
+      </Route>
+      <Route path="/suppliers">
+        <ProtectedRoute allowedRoles={["admin", "developer", "accountant"]}><SuppliersPage /></ProtectedRoute>
+      </Route>
+      <Route path="/shifts">
+        <ProtectedRoute><ShiftsPage /></ProtectedRoute>
+      </Route>
+      <Route path="/tables">
+        <ProtectedRoute><TablesPage /></ProtectedRoute>
+      </Route>
+      <Route path="/expenses">
+        <ProtectedRoute allowedRoles={["admin", "developer", "accountant"]}><ExpensesPage /></ProtectedRoute>
+      </Route>
+      <Route path="/licenses">
+        <ProtectedRoute requireDeveloper><LicensesPage /></ProtectedRoute>
+      </Route>
+      <Route path="/audit">
+        <ProtectedRoute requireDeveloper><AuditPage /></ProtectedRoute>
+      </Route>
+      <Route path="/document-print-settings">
+        <ProtectedRoute requireDeveloper><DocumentPrintSettingsPage /></ProtectedRoute>
+      </Route>
+      <Route path="/inventory">
+        <ProtectedRoute><InventoryPage /></ProtectedRoute>
       </Route>
       <Route path="/">
         <ProtectedRoute><Pos /></ProtectedRoute>
@@ -79,7 +119,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+        <WouterRouter base={((import.meta as any).env?.BASE_URL || "").replace(/\/$/, "")}>
           <AuthProvider>
             <Router />
           </AuthProvider>

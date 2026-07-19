@@ -8,7 +8,7 @@ export interface User {
   id: number;
   username: string;
   name: string;
-  role: "admin" | "cashier";
+  role: "admin" | "cashier" | "developer" | "accountant";
   active: boolean;
   createdAt?: string;
   [key: string]: any;
@@ -17,7 +17,7 @@ export interface User {
 export interface UserInput {
   username: string;
   name: string;
-  role: "admin" | "cashier";
+  role: "admin" | "cashier" | "developer" | "accountant";
   password?: string;
   active: boolean;
   [key: string]: any;
@@ -26,7 +26,7 @@ export interface UserInput {
 export interface UserUpdate {
   username?: string;
   name?: string;
-  role?: "admin" | "cashier";
+  role?: "admin" | "cashier" | "developer" | "accountant";
   password?: string | null;
   active?: boolean;
   [key: string]: any;

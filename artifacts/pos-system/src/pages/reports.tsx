@@ -40,7 +40,10 @@ export default function Reports() {
   const printRef = useRef<HTMLDivElement>(null);
 
   const dateParams = `?startDate=${startDate}&endDate=${endDate}`;
-  const { data: salesRows = [], isLoading: isSalesLoading } = useGetSalesReport({ startDate, endDate, groupBy });
+  const { data: salesRows = [], isLoading: isSalesLoading } = useQuery<any[]>({
+    queryKey: ["reports-sales", startDate, endDate, groupBy],
+    queryFn: () => fetchWithAuth(`/api/reports/sales${dateParams}&groupBy=${groupBy}`)
+  });
   const { data: cashierRows = [] } = useQuery<any[]>({ queryKey: ["reports-cashier", startDate, endDate], queryFn: () => fetchWithAuth(`/api/reports/by-cashier${dateParams}`) });
   const { data: productRows = [] } = useQuery<any[]>({ queryKey: ["reports-product", startDate, endDate], queryFn: () => fetchWithAuth(`/api/reports/by-product${dateParams}&limit=30`) });
   const { data: categoryRows = [] } = useQuery<any[]>({ queryKey: ["reports-category", startDate, endDate], queryFn: () => fetchWithAuth(`/api/reports/by-category${dateParams}`) });
@@ -52,10 +55,19 @@ export default function Reports() {
   const totalDiscount = salesRows.reduce((s, r) => s + ((r as any).discount ?? 0), 0);
   const totalTax = salesRows.reduce((s, r) => s + ((r as any).tax ?? 0), 0);
 
-  const handlePrint = () => {
-    if (selectedPrinter === "__window__") {
-      window.print();
-      setShowPrintDlg(false);
+  const handlePrint = async () => {
+    const electronAPI = (window as any).electronAPI;
+    if (electronAPI && electronAPI.isElectron) {
+      try {
+        // Use the selected printer, or fallback if empty or "__window__"
+        const printerName = selectedPrinter && selectedPrinter !== "__window__" ? selectedPrinter : "";
+        await electronAPI.printSilent(printerName);
+        setShowPrintDlg(false);
+      } catch (err) {
+        console.error("Electron silent printing failed for report:", err);
+        window.print();
+        setShowPrintDlg(false);
+      }
     } else {
       window.print();
       setShowPrintDlg(false);
@@ -397,7 +409,7 @@ export default function Reports() {
                 <CardContent className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <Pie data={categoryRows} dataKey="totalRevenue" nameKey="categoryName" cx="50%" cy="50%" outerRadius={90} label={({ categoryName, percent }) => `${categoryName} (${(percent * 100).toFixed(0)}%)`}>
+                      <Pie data={categoryRows} dataKey="totalRevenue" nameKey="categoryName" cx="50%" cy="50%" outerRadius={90} label={(entry: any) => `${entry.categoryName} (${(entry.percent * 100).toFixed(0)}%)`}>
                         {categoryRows.map((_: any, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                       </Pie>
                       <Tooltip formatter={(v: number) => [fmt(v), "الإيراد"]} />
@@ -472,7 +484,7 @@ export default function Reports() {
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie data={paymentRows} dataKey="total" nameKey="paymentMethod" cx="50%" cy="50%" outerRadius={90}
-                        label={({ paymentMethod, percent }) => `${paymentLabel(paymentMethod)} (${(percent * 100).toFixed(0)}%)`}>
+                        label={(entry: any) => `${paymentLabel(entry.paymentMethod)} (${(entry.percent * 100).toFixed(0)}%)`}>
                         {paymentRows.map((_: any, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                       </Pie>
                       <Tooltip formatter={(v: number) => [fmt(v), "الإجمالي"]} labelFormatter={paymentLabel} />

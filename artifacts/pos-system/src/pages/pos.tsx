@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import { flushSync } from "react-dom";
 import { PosLayout } from "@/components/pos-layout";
 import {
@@ -17,6 +17,10 @@ import { useToast } from "@/hooks/use-toast";
 import { Trash2, Plus, Minus, Printer, ShoppingCart, X, UtensilsCrossed } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReceiptPreview, MasterReceiptSlip, DeptReceiptSlip } from "@/components/receipt";
+import { getOfflinePrintQueue, addOfflinePrintJob, removeOfflinePrintJob } from "@/lib/printQueue";
+import { qzService } from "@/lib/qzTrayService";
+import { useQZTray } from "@/hooks/useQZTray";
+import { QZTrayWidget } from "@/components/QZTrayWidget";
 
 type CartItem = {
   product: Product;
@@ -40,68 +44,150 @@ const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   "delivery": "توصيل",
 };
 
-function generateReceiptText(order: Order, settings: any, cashierName: string): string {
+function parseOrderDate(dateStr: string | undefined | null): Date {
+  if (!dateStr) return new Date();
+  let s = String(dateStr).trim();
+  if (s && !s.endsWith("Z") && !s.includes("+") && !/-\d{2}:\d{2}$/.test(s)) {
+    s = s.replace(" ", "T") + "Z";
+  }
+  const parsed = new Date(s);
+  return isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+function generateReceiptText(order: Order, settings: any, cashierName: string, printerSettings?: any): string {
   const lines: string[] = [];
-  const w = 40;
-  const center = (s: string) => s.padStart(Math.floor((w + s.length) / 2)).padEnd(w);
+  const w = Number(printerSettings?.charactersPerLine || settings?.charactersPerLine || 40);
+  
+  // Left margin in spaces
+  const leftMarginSpaces = Math.max(0, Math.round((printerSettings?.leftMargin ?? 0) / 1.5));
+  const padLeft = " ".repeat(leftMarginSpaces);
+
+  const center = (s: string) => {
+    if (s.length >= w) return s;
+    const padLen = Math.floor((w - s.length) / 2);
+    return " ".repeat(padLen) + s;
+  };
   const line = (ch = "-") => ch.repeat(w);
+  const cleanInvoiceNumber = order.invoiceNumber.replace(/^INV-0*/, "") || "0";
+
+  // Top margin in newlines
+  const topMarginLines = Math.max(0, Math.floor((printerSettings?.topMargin ?? 0) / 4));
+  for (let i = 0; i < topMarginLines; i++) {
+    lines.push("");
+  }
 
   lines.push(center(settings?.businessName ?? "المطعم"));
   if (settings?.address) lines.push(center(settings.address));
   lines.push(line("."));
   lines.push(center("فاتورة خاصة بالزبون"));
-  lines.push(center(order.invoiceNumber));
+  lines.push(center(`الرقم المسلسل: [ ${cleanInvoiceNumber} ]`));
   lines.push(line("."));
-  const d = new Date(order.createdAt);
+  const d = parseOrderDate(order.createdAt);
   const dateStr = `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
-  const timeStr = `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
-  lines.push(`${dateStr}  ${timeStr}`);
-  if (order.tableNumber) lines.push(`الطاولة: ${order.tableNumber}`);
+  const timeStr = `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;
+  lines.push(`التاريخ: ${dateStr}  ${timeStr}`);
+  lines.push(`نوع الطلب: ${ORDER_TYPE_LABELS[order.orderType ?? "dine-in"] ?? "محلي"}`);
+  lines.push(`الطاولة: ${order.tableNumber || "0"}    ط`);
   lines.push(line("-"));
-  lines.push(`${"الصنف".padEnd(20)}${"الكمية".padStart(5)}${"السعر".padStart(10)}`);
+  
+  // Dynamic columns calculation to prevent wrapping
+  const priceW = Math.max(8, Math.floor(w * 0.25));
+  const qtyW = Math.max(4, Math.floor(w * 0.15));
+  const nameW = w - priceW - qtyW;
+
+  lines.push(`${"الصنف".padEnd(nameW)}${"الكمية".padStart(qtyW)}${"السعر".padStart(priceW)}`);
   lines.push(line("-"));
   for (const item of order.items ?? []) {
-    const name = item.productName.substring(0, 18).padEnd(20);
-    const qty = String(item.quantity).padStart(5);
-    const price = String(item.unitPrice.toLocaleString()).padStart(10);
+    const name = item.productName.substring(0, Math.max(5, nameW - 1)).padEnd(nameW);
+    const qty = String(item.quantity).padStart(qtyW);
+    const price = String(item.unitPrice.toLocaleString()).padStart(priceW);
     lines.push(`${name}${qty}${price}`);
   }
+  lines.push(line("-"));
+  
+  const totalStr = `الإجمالي: ${order.total.toFixed(2)} ${settings?.currency ?? "ريال"}`;
+  lines.push(totalStr.padStart(w));
   lines.push(line("="));
-  lines.push(`الإجمالي: ${order.total.toFixed(2)} ${settings?.currency ?? "ريال"}`.padStart(w));
-  lines.push("");
   if (cashierName) lines.push(center(`اسم الكاشير: ${cashierName}`));
   if (order.note) lines.push(`ملاحظات: ${order.note}`);
-  lines.push("");
+  lines.push(line("-"));
   lines.push(center("الطلب لا يمكن استرجاعه أو إلغاؤه"));
   if (settings?.phone) lines.push(center(`أرقام التواصل: ${settings.phone}`));
-  lines.push("\n\n\n");
-  return lines.join("\n");
+  
+  // Visual Cut indicator and feed lines to separate receipts
+  lines.push(line("-"));
+  lines.push(center("✄ - - - - - - - - - - - - - - - - ✄"));
+  lines.push(line("-"));
+
+  // Bottom margin in newlines (force at least 6 lines of feed to clear printhead to cutter)
+  const bottomMarginLines = Math.max(6, Math.floor((printerSettings?.bottomMargin ?? 8) / 2));
+  for (let i = 0; i < bottomMarginLines; i++) {
+    lines.push("");
+  }
+
+  // Prepend left margin to all lines
+  return lines.map(l => l ? padLeft + l : l).join("\n");
 }
 
-function generateDeptReceiptText(order: Order, dept: any, items: any[], settings: any): string {
+function generateDeptReceiptText(order: Order, dept: any, items: any[], settings: any, printerSettings?: any): string {
   const lines: string[] = [];
-  const w = 32;
-  const center = (s: string) => s.padStart(Math.floor((w + s.length) / 2)).padEnd(w);
+  const w = Number(printerSettings?.charactersPerLine || settings?.charactersPerLine || 32);
+
+  // Left margin in spaces
+  const leftMarginSpaces = Math.max(0, Math.round((printerSettings?.leftMargin ?? 0) / 1.5));
+  const padLeft = " ".repeat(leftMarginSpaces);
+
+  const center = (s: string) => {
+    if (s.length >= w) return s;
+    const padLen = Math.floor((w - s.length) / 2);
+    return " ".repeat(padLen) + s;
+  };
   const line = (ch = "-") => ch.repeat(w);
+  const cleanInvoiceNumber = order.invoiceNumber.replace(/^INV-0*/, "") || "0";
+
+  // Top margin in newlines
+  const topMarginLines = Math.max(0, Math.floor((printerSettings?.topMargin ?? 0) / 4));
+  for (let i = 0; i < topMarginLines; i++) {
+    lines.push("");
+  }
 
   lines.push(center(settings?.businessName ?? "المطعم"));
   lines.push(center(`قسم: ${dept.categoryName}`));
   lines.push(line("."));
-  lines.push(center("فاتورة قسم"));
-  lines.push(center(order.invoiceNumber));
+  lines.push(center(`أمر صرف رقم: [ ${cleanInvoiceNumber} ]`));
   lines.push(line("-"));
-  const d = new Date(order.createdAt);
+  const d = parseOrderDate(order.createdAt);
   const dateStr = `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
-  lines.push(`${dateStr}`);
-  if (order.tableNumber) lines.push(`الطاولة: ${order.tableNumber}`);
+  lines.push(`التاريخ: ${dateStr}`);
+  lines.push(`نوع الطلب: ${ORDER_TYPE_LABELS[order.orderType ?? "dine-in"] ?? "محلي"}`);
+  lines.push(`الطاولة: ${order.tableNumber || "0"}    ط`);
   lines.push(line("="));
+  
+  // Dynamic column layout
+  const qtyW = Math.max(4, Math.floor(w * 0.15));
+  const nameW = w - qtyW;
+
   for (const item of items) {
-    lines.push(`${item.productName.substring(0, 20).padEnd(22)}  x${item.quantity}`);
+    const name = item.productName.substring(0, Math.max(5, nameW - 1)).padEnd(nameW);
+    const qty = `x${item.quantity}`.padStart(qtyW);
+    lines.push(`${name}${qty}`);
   }
   lines.push(line("="));
   if (order.note) lines.push(`ملاحظات: ${order.note}`);
-  lines.push("\n\n\n");
-  return lines.join("\n");
+  
+  // Visual Cut indicator and feed lines to separate receipts
+  lines.push(line("-"));
+  lines.push(center("✄ - - - - - - - - - - - - - - - - ✄"));
+  lines.push(line("-"));
+
+  // Bottom margin in newlines (force at least 6 lines of feed to clear printhead to cutter)
+  const bottomMarginLines = Math.max(6, Math.floor((printerSettings?.bottomMargin ?? 8) / 2));
+  for (let i = 0; i < bottomMarginLines; i++) {
+    lines.push("");
+  }
+
+  // Prepend left margin to all lines
+  return lines.map(l => l ? padLeft + l : l).join("\n");
 }
 
 export default function Pos() {
@@ -119,7 +205,11 @@ export default function Pos() {
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
-  const [typedCode, setTypedCode] = useState("");
+  const [typedNumberBuffer, setTypedNumberBuffer] = useState("");
+  const [selectedCartIndex, setSelectedCartIndex] = useState(0);
+  const [isQtyEditing, setIsQtyEditing] = useState(false);
+  const [qtyEditBuffer, setQtyEditBuffer] = useState("");
+  const [lastEnterTimestamp, setLastEnterTimestamp] = useState(0);
   const [discount, setDiscount] = useState(0);
   const [orderType, setOrderType] = useState<OrderType>("dine-in");
   const [tableNumber, setTableNumber] = useState("");
@@ -132,12 +222,7 @@ export default function Pos() {
   const [reprintReason, setReprintReason] = useState("");
   const [showReprintDialog, setShowReprintDialog] = useState(false);
   const [activePrintPage, setActivePrintPage] = useState<PrintPage | null>(null);
-
-  // ── تحسينات الكيبورد ونقطة المبيعات ──
-  const [selectedCartIdx, setSelectedCartIdx] = useState<number | null>(null);
-  const [qtyEditMode, setQtyEditMode] = useState<number | null>(null);
-  const lastEnterTimeRef = useRef<number>(0);
-  const isPrintingRef = useRef(false);
+  const [activePrintPages, setActivePrintPages] = useState<PrintPage[]>([]);
 
   // ── وجبات الموظفين ──
   const [mealMode, setMealMode] = useState(false);
@@ -145,6 +230,96 @@ export default function Pos() {
   const [foundEmployee, setFoundEmployee] = useState<any>(null);
   const [showMealConfirm, setShowMealConfirm] = useState(false);
   const [lookingUpEmp, setLookingUpEmp] = useState(false);
+  const [offlineJobsCount, setOfflineJobsCount] = useState(0);
+  const [showQZTrayDialog, setShowQZTrayDialog] = useState(false);
+  const qz = useQZTray();
+
+  useEffect(() => {
+    const updateCount = () => {
+      setOfflineJobsCount(getOfflinePrintQueue().length);
+    };
+    updateCount();
+    window.addEventListener("print-queue-updated", (e: any) => {
+      setOfflineJobsCount(e.detail?.count ?? getOfflinePrintQueue().length);
+    });
+
+    // Background auto-retry worker every 20 seconds
+    const interval = setInterval(async () => {
+      const queue = getOfflinePrintQueue();
+      if (queue.length === 0) return;
+
+      let successCount = 0;
+      for (const job of queue) {
+        try {
+          const res: any = await new Promise((resolve) => {
+            printReceiptDirect.mutate(
+              { data: { printerName: job.printerName, content: job.content, copies: job.copies } },
+              {
+                onSuccess: (data) => resolve(data),
+                onError: (err) => resolve({ ok: false, message: err?.message }),
+              }
+            );
+          });
+          if (res && res.ok) {
+            removeOfflinePrintJob(job.id);
+            successCount++;
+          }
+        } catch (e) {
+          break;
+        }
+      }
+
+      if (successCount > 0) {
+        toast({
+          title: "🖨️ تم طباعة الفواتير المعلقة بنجاح",
+          description: `تم إرسال ${successCount} فاتورة معلقة للطابعة بعد استعادة الاتصال بها.`
+        });
+      }
+    }, 20000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const retryOfflineQueue = async () => {
+    const queue = getOfflinePrintQueue();
+    if (queue.length === 0) {
+      toast({ title: "لا توجد فواتير معلقة" });
+      return;
+    }
+    let successCount = 0;
+    for (const job of queue) {
+      try {
+        const res: any = await new Promise((resolve) => {
+          printReceiptDirect.mutate(
+            { data: { printerName: job.printerName, content: job.content, copies: job.copies } },
+            {
+              onSuccess: (data) => resolve(data),
+              onError: (err) => resolve({ ok: false, message: err?.message }),
+            }
+          );
+        });
+        if (res && res.ok) {
+          removeOfflinePrintJob(job.id);
+          successCount++;
+        }
+      } catch (e) {
+        // continue
+      }
+    }
+
+    if (successCount > 0) {
+      toast({
+        title: "🖨️ تم طباعة الفواتير المعلقة بنجاح",
+        description: `تم إرسال ${successCount} فاتورة معلقة للطابعة بنجاح.`
+      });
+    } else {
+      toast({
+        variant: "destructive",
+        title: "⚠️ تعذر الاتصال بالطابعة",
+        description: "ما زالت الطابعة غير متصلة أو لا تستجيب. حاول مرة أخرى لاحقاً."
+      });
+    }
+  };
 
   const taxRate = settings?.taxRate ?? 15;
   const currency = settings?.currency ?? "ريال";
@@ -166,24 +341,17 @@ export default function Pos() {
     });
   }, []);
 
-  const removeFromCart = (productId: number) => {
+  const removeFromCart = useCallback((productId: number) => {
     setCart(prev => prev.filter(i => i.product.id !== productId));
-  };
+  }, []);
 
-  const changeQty = (productId: number, delta: number) => {
+  const changeQty = useCallback((productId: number, delta: number) => {
     setCart(prev => prev.map(i => {
       if (i.product.id !== productId) return i;
       const newQty = i.quantity + delta;
       return newQty <= 0 ? null : { ...i, quantity: newQty };
     }).filter(Boolean) as CartItem[]);
-  };
-
-  const setItemExactQty = (productId: number, newQty: number) => {
-    setCart(prev => prev.map(i => {
-      if (i.product.id !== productId) return i;
-      return newQty <= 0 ? null : { ...i, quantity: newQty };
-    }).filter(Boolean) as CartItem[]);
-  };
+  }, []);
 
   const subtotal = cart.reduce((s, i) => s + i.product.price * i.quantity, 0);
   const discountAmt = Math.min(discount, subtotal);
@@ -191,119 +359,195 @@ export default function Pos() {
   const taxAmt = afterDiscount * (taxRate / 100);
   const total = afterDiscount + taxAmt;
 
-  // ── Global Keyboard Shortcuts Handler ──
+  // ── Keyboard Shortcuts Integration ──────────────────────────────
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (showPayDialog) {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          confirmPay();
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (showPayDialog) setShowPayDialog(false);
+        if (showReceipt) setShowReceipt(false);
+        if (showMealConfirm) { setShowMealConfirm(false); setFoundEmployee(null); }
+        if (showReprintDialog) setShowReprintDialog(false);
+        setTypedNumberBuffer("");
+        setIsQtyEditing(false);
+        return;
+      }
+
+      if (["F1", "F2", "F3", "F4", "F5", "F8"].includes(e.key)) {
+        e.preventDefault();
+      }
+
+      if (e.key === "F1") {
+        setTypedNumberBuffer("");
+        return;
+      }
+
+      if (e.key === "F2") {
+        if (cart.length > 0 && !showPayDialog && !showReceipt && !showMealConfirm) {
+          handlePay();
         }
         return;
       }
-      if (showReceipt) {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          if (lastOrder) triggerDirectPrint(lastOrder);
+
+      if (e.key === "F3") {
+        if (cart.length > 0 && !showPayDialog && !showReceipt && !showMealConfirm) {
+          setCart([]);
+          setSelectedCartIndex(0);
+          toast({ title: "🗑️ تم إفراغ السلة", description: "تم مسح جميع المنتجات من السلة" });
+        }
+        return;
+      }
+
+      if (e.key === "F4") {
+        if (!showPayDialog && !showReceipt && !showMealConfirm) {
+          const types: OrderType[] = ["dine-in", "takeout", "delivery"];
+          const currentIndex = types.indexOf(orderType);
+          const nextIndex = (currentIndex + 1) % types.length;
+          setOrderType(types[nextIndex]);
+          toast({ title: "📋 نوع الطلب", description: `تم التغيير إلى: ${ORDER_TYPE_LABELS[types[nextIndex]]}` });
+        }
+        return;
+      }
+
+      if (e.key === "F5") {
+        if (!showPayDialog && !showReceipt && !showMealConfirm) {
+          setMealMode(prev => {
+            const newVal = !prev;
+            if (newVal) setEmpNumInput("");
+            return newVal;
+          });
+        }
+        return;
+      }
+
+      if (e.key === "F8") {
+        if (lastOrder) {
+          handleReprint();
+        } else {
+          toast({ variant: "destructive", title: "لا يوجد طلب سابق لإعادة طباعته" });
         }
         return;
       }
 
       const activeEl = document.activeElement;
-      const isInputActive = activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA" || activeEl.tagName === "SELECT");
+      const isInputFocused = activeEl && (
+        activeEl.tagName === "INPUT" || 
+        activeEl.tagName === "TEXTAREA" || 
+        activeEl.getAttribute("contenteditable") === "true"
+      );
 
-      if (isInputActive) return;
+      if (isInputFocused && !showPayDialog) return;
 
-      if (qtyEditMode !== null && /^[0-9]$/.test(e.key)) {
+      if (showPayDialog && e.key === "Enter") {
         e.preventDefault();
-        const digit = parseInt(e.key);
-        const item = cart[qtyEditMode];
-        if (item) {
-          setItemExactQty(item.product.id, digit === 0 ? 10 : digit);
+        confirmPay();
+        return;
+      }
+
+      // Arrow Up
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (cart.length > 0) {
+          setIsQtyEditing(false);
+          setSelectedCartIndex(prev => Math.max(0, prev - 1));
         }
         return;
       }
 
+      // Arrow Down
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (cart.length > 0) {
+          setIsQtyEditing(false);
+          setSelectedCartIndex(prev => Math.min(cart.length - 1, prev + 1));
+        }
+        return;
+      }
+
+      // Side Arrows (ArrowLeft / ArrowRight) to toggle Qty Editing
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        if (cart.length > 0 && selectedCartIndex >= 0 && selectedCartIndex < cart.length) {
+          setIsQtyEditing(prev => {
+            const next = !prev;
+            if (next) {
+              setQtyEditBuffer(String(cart[selectedCartIndex].quantity));
+            }
+            return next;
+          });
+        }
+        return;
+      }
+
+      if (cart.length > 0) {
+        const targetIdx = selectedCartIndex >= 0 && selectedCartIndex < cart.length ? selectedCartIndex : cart.length - 1;
+        const targetItem = cart[targetIdx];
+        if (e.key === "+" || e.key === "=") {
+          e.preventDefault();
+          changeQty(targetItem.product.id, 1);
+          return;
+        } else if (e.key === "-") {
+          e.preventDefault();
+          changeQty(targetItem.product.id, -1);
+          return;
+        }
+      }
+
+      // Number keys (0-9)
       if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
-        setTypedCode(prev => prev + e.key);
+        if (isQtyEditing && cart.length > 0 && selectedCartIndex >= 0 && selectedCartIndex < cart.length) {
+          const newBuf = qtyEditBuffer + e.key;
+          setQtyEditBuffer(newBuf);
+          const val = parseInt(newBuf);
+          if (!isNaN(val) && val > 0) {
+            const targetItem = cart[selectedCartIndex];
+            const diff = val - targetItem.quantity;
+            if (diff !== 0) {
+              changeQty(targetItem.product.id, diff);
+            }
+          }
+        } else {
+          setTypedNumberBuffer(prev => prev + e.key);
+        }
         return;
       }
 
       if (e.key === "Backspace") {
         e.preventDefault();
-        setTypedCode(prev => prev.slice(0, -1));
+        if (isQtyEditing) {
+          setQtyEditBuffer(prev => prev.slice(0, -1));
+        } else {
+          setTypedNumberBuffer(prev => prev.slice(0, -1));
+        }
         return;
       }
 
-      if (cart.length > 0) {
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          setSelectedCartIdx(prev => (prev === null ? 0 : Math.min(prev + 1, cart.length - 1)));
-          setQtyEditMode(null);
-        } else if (e.key === "ArrowUp") {
-          e.preventDefault();
-          setSelectedCartIdx(prev => (prev === null ? cart.length - 1 : Math.max(prev - 1, 0)));
-          setQtyEditMode(null);
-        } else if (e.key === "+" || e.key === "=") {
-          e.preventDefault();
-          if (selectedCartIdx !== null && cart[selectedCartIdx]) {
-            changeQty(cart[selectedCartIdx].product.id, 1);
-          }
-        } else if (e.key === "-" || e.key === "_") {
-          e.preventDefault();
-          if (selectedCartIdx !== null && cart[selectedCartIdx]) {
-            changeQty(cart[selectedCartIdx].product.id, -1);
-          }
-        } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-          e.preventDefault();
-          if (selectedCartIdx !== null) {
-            setQtyEditMode(prev => (prev === selectedCartIdx ? null : selectedCartIdx));
-          }
-        } else if (e.key === "Enter") {
-          e.preventDefault();
-          if (typedCode.trim()) {
-            const num = parseInt(typedCode);
-            const prod = products.find(p => p.number === num && p.active);
-            if (prod) {
-              addToCart(prod);
-              setTypedCode("");
-            } else {
-              toast({ variant: "destructive", title: "رقم الصنف غير موجود", description: `لم يتم العثور على صنف بالرقم ${num}` });
-              setTypedCode("");
-            }
-          } else if (qtyEditMode !== null) {
-            setQtyEditMode(null);
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (typedNumberBuffer.trim()) {
+          const num = parseInt(typedNumberBuffer.trim());
+          const prod = products.find(p => p.number === num && p.active);
+          if (prod) {
+            addToCart(prod);
+            setTypedNumberBuffer("");
           } else {
-            const now = Date.now();
-            if (now - lastEnterTimeRef.current < 600) {
-              handlePay();
-            } else {
-              lastEnterTimeRef.current = now;
-            }
+            toast({ variant: "destructive", title: "رقم الصنف غير موجود", description: `لم يتم العثور على أي منتج يحمل الرقم (${num})` });
+            setTypedNumberBuffer("");
           }
-        }
-      } else {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          if (typedCode.trim()) {
-            const num = parseInt(typedCode);
-            const prod = products.find(p => p.number === num && p.active);
-            if (prod) {
-              addToCart(prod);
-              setTypedCode("");
-            } else {
-              toast({ variant: "destructive", title: "رقم الصنف غير موجود", description: `لم يتم العثور على صنف بالرقم ${num}` });
-              setTypedCode("");
-            }
+        } else if (cart.length > 0) {
+          const now = Date.now();
+          if (now - lastEnterTimestamp < 600) {
+            handlePay();
           }
+          setLastEnterTimestamp(now);
         }
+        return;
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [cart, selectedCartIdx, qtyEditMode, showPayDialog, showReceipt, lastOrder, typedCode, products]);
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [cart, orderType, lastOrder, showPayDialog, showReceipt, showMealConfirm, showReprintDialog, mealMode, typedNumberBuffer, selectedCartIndex, isQtyEditing, qtyEditBuffer, lastEnterTimestamp, changeQty, addToCart, products]);
 
   const handlePay = () => {
     if (cart.length === 0) return;
@@ -357,8 +601,9 @@ export default function Pos() {
 
   const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
-  // ── طباعة صفحة واحدة عبر المتصفح (مع تطبيق إعدادات الطابعة) ────────
-  const browserPrint = async (page: PrintPage) => {
+  // ── طباعة صفحة واحدة أو صفحات متعددة عبر المتصفح (مع تطبيق إعدادات الطابعة) ────────
+  const browserPrint = async (pages: PrintPage | PrintPage[]) => {
+    const pagesArray = Array.isArray(pages) ? pages : [pages];
     // تطبيق إعدادات الطابعة ديناميكياً قبل الطباعة
     const ps = printerSettings;
     const styleId = "__pos-dynamic-print__";
@@ -367,164 +612,229 @@ export default function Pos() {
       const el = document.createElement("style");
       el.id = styleId;
       el.textContent = `
-        @page { size: ${ps.paperWidth}mm auto; margin: 0; }
+        @page { size: ${ps.paperWidth}mm auto; margin: 0 !important; }
+        .hidden-print-container, .print-page {
+          width: ${ps.paperWidth}mm !important;
+          box-sizing: border-box !important;
+        }
         .receipt-slip {
           font-size: ${ps.fontSize}px !important;
           line-height: ${1 + (ps.lineSpacing ?? 2) / 10} !important;
           padding: ${ps.topMargin}mm ${ps.rightMargin}mm ${ps.bottomMargin}mm ${ps.leftMargin}mm !important;
+          width: ${ps.paperWidth}mm !important;
+          max-width: 100% !important;
+          box-sizing: border-box !important;
         }
       `;
       document.head.appendChild(el);
     }
 
-    flushSync(() => setActivePrintPage(page));
-    await new Promise<void>(r => requestAnimationFrame(() => setTimeout(r, 80)));
-    window.print();
+    if (pagesArray.length === 1) {
+      flushSync(() => setActivePrintPage(pagesArray[0]));
+    } else {
+      flushSync(() => setActivePrintPages(pagesArray));
+    }
+    
+    // الانتظار الفعلي حتى تحميل الشعار وباقي الصور في نافذة الطباعة لتجنب الطباعة قبل تحميل الشعار
+    await new Promise<void>(resolve => {
+      const images = document.querySelectorAll("#receipt-print-area img");
+      if (images.length === 0) {
+        setTimeout(resolve, 150);
+        return;
+      }
+      let loadedCount = 0;
+      const onImageLoad = () => {
+        loadedCount++;
+        if (loadedCount === images.length) {
+          setTimeout(resolve, 120); // تأخير إضافي لضمان ثبات الرسم
+        }
+      };
+      images.forEach(img => {
+        const htmlImg = img as HTMLImageElement;
+        if (htmlImg.complete) {
+          onImageLoad();
+        } else {
+          htmlImg.addEventListener("load", onImageLoad, { once: true });
+          htmlImg.addEventListener("error", onImageLoad, { once: true });
+        }
+      });
+    });
+
+    const electronAPI = (window as any).electronAPI;
+    if (electronAPI && electronAPI.isElectron) {
+      const printerName = printerSettings?.mainPrinterName || "";
+      try {
+        await electronAPI.printSilent(printerName);
+      } catch (err) {
+        console.error("Electron silent printing failed, falling back to window.print():", err);
+        window.print();
+      }
+    } else {
+      window.print();
+    }
     setActivePrintPage(null);
+    setActivePrintPages([]);
     document.getElementById(styleId)?.remove();
   };
 
-  // ── إرسال فاتورة قسم مباشرة للطابعة الشبكية ───────────────────────
-  const directPrint = (order: Order, dept: any, items: any[], printerOverride?: string) =>
-    new Promise<void>(resolve => {
-      const content = generateDeptReceiptText(order, dept, items, settings);
-      const printerName = printerOverride ?? dept.printerName;
+  // ── إرسال فاتورة قسم مباشرة عبر QZ Tray أو الطابعة الشبكية ───────────────────────
+  const directPrint = async (order: Order, dept: any, items: any[], printerOverride?: string): Promise<boolean> => {
+    const content = generateDeptReceiptText(order, dept, items, settings, printerSettings);
+    const printerName = printerOverride ?? dept.printerName;
+
+    // 1. Try QZ Tray if connected
+    if (qz.connected) {
+      // Standard ESC/POS paper-cut codes to support all printer models:
+      // - \x1D\x56\x42\x00: GS V 66 0 (Feed & Partial cut)
+      // - \x1D\x56\x01: GS V 1 (Partial cut)
+      // - \x1B\x69: ESC i (Epson Full cut)
+      // - \x1B\x6D: ESC m (Star/Epson Partial cut)
+      const cutCommand = "\n\n\n\x1D\x56\x42\x00\x1D\x56\x01\x1B\x69\x1B\x6D";
+      const qzRes = await qz.printData(printerName, content + cutCommand, 1, true);
+      if (qzRes.success) {
+        return true;
+      }
+    }
+
+    // 2. Fallback to backend direct print API
+    return new Promise<boolean>(resolve => {
       printReceiptDirect.mutate(
         { data: { printerName, content, copies: 1 } },
         {
           onSuccess: (res) => {
-            if (!res.ok)
-              toast({ variant: "destructive", title: `فشل طباعة قسم ${dept.categoryName}: ${res.message ?? ""}` });
-            resolve();
+            if (!res || !res.ok) {
+              console.error(`Direct print failed for dept ${dept.categoryName}:`, res?.message);
+              addOfflinePrintJob({
+                printerName: printerName || "Default",
+                content,
+                orderId: order.id,
+                invoiceNumber: order.invoiceNumber,
+                receiptType: "department",
+                departmentName: dept.categoryName ?? "قسم",
+                copies: 1,
+              });
+              resolve(false);
+            } else {
+              resolve(true);
+            }
           },
-          onError: () => resolve(),
+          onError: (err: any) => {
+            console.error(`Direct print error for dept ${dept.categoryName}:`, err);
+            addOfflinePrintJob({
+              printerName: printerName || "Default",
+              content,
+              orderId: order.id,
+              invoiceNumber: order.invoiceNumber,
+              receiptType: "department",
+              departmentName: dept.categoryName ?? "قسم",
+              copies: 1,
+            });
+            resolve(false);
+          },
         }
       );
     });
+  };
 
-  // ── طباعة صامتة كاملة للطابعة الشبكية (بدون نافذة حوار) ───────────
-  const silentPrintAll = async (order: Order) => {
-    const mainPrinter = (printerSettings as any)?.mainPrinterName as string | null | undefined;
-    const copiesCount = settings?.masterCopiesCount ?? 1;
-    const enabledCopies = receiptCopies.filter(c => c.enabled);
-    const deptGroups = getDeptGroups(order);
-
-    // 1) الفاتورة الرئيسية → إرسال لطابعة الفاتورة الرئيسية
-    if (mainPrinter) {
-      const masterText = generateReceiptText(order, settings, user?.name ?? "");
-      for (let i = 0; i < copiesCount; i++) {
-        const copyLabel = enabledCopies[i]?.label ?? `نسخة ${i + 1}`;
-        await new Promise<void>(resolve => {
-          printReceiptDirect.mutate(
-            { data: { printerName: mainPrinter, content: masterText, copies: 1 } },
-            {
-              onSuccess: () => resolve(),
-              onError: () => resolve(),
-            }
-          );
-        });
-        createPrintLog.mutate({ data: {
-          orderId: order.id, invoiceNumber: order.invoiceNumber,
-          receiptType: "master", departmentName: copyLabel,
-          printerName: mainPrinter, copies: 1, status: "success", reprintCount: 0,
-        }});
-        if (i < copiesCount - 1) await sleep(200);
+  // ── طباعة صامتة كاملة خلفية موجهة بالكامل لخادم الخلفية (بدون نافذة حوار) ───────────
+  const silentPrintAll = async (order: Order): Promise<boolean> => {
+    try {
+      const token = localStorage.getItem("pos_token") ?? "";
+      const resp = await fetch("/api/printers/electron-print", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ order }),
+      });
+      if (!resp.ok) {
+        throw new Error(await resp.text());
       }
-    }
-
-    // 2) فواتير الأقسام → كل قسم لطابعته
-    for (const { dept, items } of deptGroups) {
-      if (!items.length) continue;
-      for (let c = 0; c < dept.copies; c++) {
-        await directPrint(order, dept, items);
-        createPrintLog.mutate({ data: {
-          orderId: order.id, invoiceNumber: order.invoiceNumber,
-          receiptType: "department", departmentName: dept.categoryName ?? "قسم",
-          printerName: dept.printerName ?? null, copies: 1, status: "success", reprintCount: 0,
-        }});
-        if (c < dept.copies - 1) await sleep(200);
-      }
+      const data = await resp.json();
+      return !!data.ok;
+    } catch (err) {
+      console.error("Silent print background error:", err);
+      return false;
     }
   };
 
-  // ── دالة الطباعة الرئيسية (Queue تسلسلي آمن) ──────────────────────────
+  // ── دالة الطباعة الرئيسية (Queue تسلسلي) ──────────────────────────
   const triggerDirectPrint = async (order: Order, isReprint = false, reprintReasonText?: string) => {
-    if (isPrintingRef.current) {
-      toast({ variant: "destructive", title: "الرجاء الانتظار، جاري طباعة فاتورة حالية..." });
-      return;
-    }
-    isPrintingRef.current = true;
+    const enabledCopies = receiptCopies.filter(c => c.enabled);
+    const copiesCount = settings?.masterCopiesCount ?? 2;
+    const deptGroups = getDeptGroups(order);
 
-    try {
-      const enabledCopies = receiptCopies.filter(c => c.enabled);
-      const copiesCount = settings?.masterCopiesCount ?? 2;
-      const deptGroups = getDeptGroups(order);
+    // ── بناء قائمة الانتظار بالترتيب ──
+    const queue: PrintJob[] = [];
 
-      // ── بناء قائمة الانتظار بالترتيب ──
-      const queue: PrintJob[] = [];
-
-      // 1) الفاتورة الرئيسية — نسخة لكل تصنيف مفعّل
-      for (let i = 0; i < copiesCount; i++) {
-        const copyLabel = enabledCopies[i]?.label ?? `نسخة ${i + 1}`;
-        queue.push({
-          kind: "browser-master",
-          copyLabel,
-          logData: {
-            orderId: order.id,
-            invoiceNumber: order.invoiceNumber,
-            receiptType: isReprint ? "reprint" : "master",
-            departmentName: copyLabel,
-            printerName: null,
-            copies: 1,
-            status: "success",
-            reprintReason: isReprint ? (reprintReasonText ?? "إعادة طباعة") : null,
-            reprintCount: isReprint ? 1 : 0,
-          },
-        });
-      }
-
-      // 2) فاتورة مستقلة لكل قسم موجود في الطلب
-      for (const { dept, items } of deptGroups) {
-        if (!items.length) continue;
-        const logData = {
+    // 1) الفاتورة الرئيسية — نسخة لكل تصنيف مفعّل
+    for (let i = 0; i < copiesCount; i++) {
+      const copyLabel = enabledCopies[i]?.label ?? `نسخة ${i + 1}`;
+      queue.push({
+        kind: "browser-master",
+        copyLabel,
+        logData: {
           orderId: order.id,
           invoiceNumber: order.invoiceNumber,
-          receiptType: "department" as const,
-          departmentName: dept.categoryName ?? "قسم",
-          printerName: dept.printerName ?? null,
-          copies: dept.copies,
-          status: "success" as const,
-          reprintCount: 0,
-        };
-        for (let c = 0; c < dept.copies; c++) {
-          if (dept.printerName) {
-            queue.push({ kind: "direct-dept", dept, items, logData });
-          } else {
-            queue.push({ kind: "browser-dept", dept, items, logData });
-          }
+          receiptType: isReprint ? "reprint" : "master",
+          departmentName: copyLabel,
+          printerName: null,
+          copies: 1,
+          status: "success",
+          reprintReason: isReprint ? (reprintReasonText ?? "إعادة طباعة") : null,
+          reprintCount: isReprint ? 1 : 0,
+        },
+      });
+    }
+
+    // 2) فاتورة مستقلة لكل قسم موجود في الطلب
+    for (const { dept, items } of deptGroups) {
+      if (!items.length) continue;
+      const logData = {
+        orderId: order.id,
+        invoiceNumber: order.invoiceNumber,
+        receiptType: "department" as const,
+        departmentName: dept.categoryName ?? "قسم",
+        printerName: dept.printerName ?? null,
+        copies: dept.copies,
+        status: "success" as const,
+        reprintCount: 0,
+      };
+      for (let c = 0; c < dept.copies; c++) {
+        if (dept.printerName) {
+          queue.push({ kind: "direct-dept", dept, items, logData });
+        } else {
+          queue.push({ kind: "browser-dept", dept, items, logData });
         }
       }
+    }
 
-      // ── تنفيذ Queue بالترتيب: فاتورة → انتهت → فاتورة التالية ──
-      for (let i = 0; i < queue.length; i++) {
-        const job = queue[i];
+    // ── تنفيذ Queue بالترتيب: فاتورة → انتهت → فاتورة التالية ──
+    const browserJobsToPrint: PrintPage[] = [];
 
-        // تسجيل الطباعة
-        createPrintLog.mutate({ data: job.logData });
+    for (let i = 0; i < queue.length; i++) {
+      const job = queue[i];
 
-        if (job.kind === "browser-master") {
-          await browserPrint({ type: "master", copyLabel: job.copyLabel });
-        } else if (job.kind === "browser-dept") {
-          await browserPrint({ type: "dept", dept: job.dept, items: job.items });
-        } else if (job.kind === "direct-dept") {
-          await directPrint(order, job.dept, job.items);
+      // تسجيل الطباعة
+      createPrintLog.mutate({ data: job.logData });
+
+      if (job.kind === "browser-master") {
+        browserJobsToPrint.push({ type: "master", copyLabel: job.copyLabel });
+      } else if (job.kind === "browser-dept") {
+        browserJobsToPrint.push({ type: "dept", dept: job.dept, items: job.items });
+      } else if (job.kind === "direct-dept") {
+        const success = await directPrint(order, job.dept, job.items);
+        if (!success) {
+          toast({
+            variant: "destructive",
+            title: `⚠️ فشلت الطباعة المباشرة لقسم ${job.dept.categoryName}`,
+            description: "سيتم تحويل الطباعة إلى المتصفح تلقائياً لطباعة هذا القسم..."
+          });
+          browserJobsToPrint.push({ type: "dept", dept: job.dept, items: job.items });
         }
-
-        // تأخير آمن بين كل وظيفة لضمان استقرار الطابعة والمتصفح
-        if (i < queue.length - 1) await sleep(400);
       }
-    } finally {
-      isPrintingRef.current = false;
+    }
+
+    if (browserJobsToPrint.length > 0) {
+      await browserPrint(browserJobsToPrint);
     }
   };
 
@@ -637,22 +947,34 @@ export default function Pos() {
         setNote("");
         setTableNumber("");
 
+        const printMode = (settings as any)?.printMode ?? "browser";
         const mainPrinter = (printerSettings as any)?.mainPrinterName as string | null | undefined;
-        const isFullySilent = autoPrintTrigger === "after_payment" && !!mainPrinter;
+        const hasMainPrinter = !!(mainPrinter && mainPrinter.trim());
 
-        if (isFullySilent) {
-          // طباعة صامتة كاملة — بدون نافذة معاينة أو حوار
-          toast({ title: "✅ تم تأكيد الطلب", description: `${order.invoiceNumber} — جاري الطباعة...` });
-          silentPrintAll(order).then(() => {
-            toast({ title: "🖨️ تمت الطباعة", description: "تمت طباعة جميع الفواتير بنجاح" });
-          });
-        } else if (autoPrintTrigger === "after_payment") {
-          // طباعة تلقائية بعد الدفع مع نافذة المعاينة
-          setShowReceipt(true);
-          setTimeout(() => triggerDirectPrint(order), 600);
+        if (printMode === "browser" || !hasMainPrinter) {
+          // إذا كانت طريقة الطباعة هي المتصفح، أو لم يتم تحديد طابعة صامتة رئيسية، نستخدم طباعة المتصفح الرسومية الجميلة تلقائياً لتطبيق الشعار والشكل المثالي
+          toast({ title: "✅ تم تأكيد الطلب", description: "جاري تحضير وإرسال الفاتورة للطباعة..." });
+          setTimeout(() => {
+            triggerDirectPrint(order);
+          }, 500);
         } else {
-          // إظهار المعاينة فقط (الطباعة يدوية)
-          setShowReceipt(true);
+          // طباعة صامتة فورية وتلقائية بالترتيب لجميع الفواتير دون أي نوافذ منبثقة أو حوارات معاينة
+          toast({ title: "✅ تم تأكيد الطلب وطباعة الفاتورة", description: `${order.invoiceNumber} — جاري إرسال الأوامر للطباعة الصامتة...` });
+          silentPrintAll(order).then((success) => {
+            if (success) {
+              toast({ title: "🖨️ تم إرسال الطباعة المباشرة", description: "تم إرسال كافة فواتير الأقسام والعميل للطابعة بنجاح" });
+            } else {
+              toast({
+                variant: "destructive",
+                title: "⚠️ تنبيه الطباعة المباشرة",
+                description: "لم نتمكن من إتمام الطباعة التلقائية عبر الطابعات المسجلة بالخادم. جاري فتح طباعة المتصفح البديلة تلقائياً..."
+              });
+              // تشغيل طباعة المتصفح التفاعلية كبديل آمن
+              setTimeout(() => {
+                triggerDirectPrint(order);
+              }, 1000);
+            }
+          });
         }
       },
       onError: () => {
@@ -699,6 +1021,15 @@ export default function Pos() {
               )}
             </div>
           )}
+          {lastOrder && activePrintPages && activePrintPages.length > 0 && activePrintPages.map((page, idx) => (
+            <div key={idx} className="print-page" style={{ pageBreakAfter: idx < activePrintPages.length - 1 ? 'always' : 'auto' }}>
+              {page.type === "master" ? (
+                <MasterReceiptSlip order={lastOrder} settings={settings ?? undefined} cashierName={user?.name} copyLabel={page.copyLabel} />
+              ) : (
+                <DeptReceiptSlip order={lastOrder} dept={page.dept} items={page.items} settings={settings ?? undefined} cashierName={user?.name} />
+              )}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -758,41 +1089,34 @@ export default function Pos() {
                 <span>اضغط على منتج للإضافة</span>
               </div>
             )}
-            {cart.map((item, idx) => {
-              const isSelected = selectedCartIdx === idx;
-              const isEditingQty = qtyEditMode === idx;
-              return (
-                <div key={item.product.id}
-                  onClick={() => { setSelectedCartIdx(idx); setQtyEditMode(null); }}
-                  className={cn("grid grid-cols-[1fr_40px_70px_24px] items-center px-2 py-1 gap-0.5 cursor-pointer transition-colors",
-                    isSelected ? "bg-blue-100 border-r-4 border-blue-600 shadow-sm" : (idx % 2 === 0 ? "bg-white" : "bg-amber-50/60"))}
-                >
-                  <span className={cn("text-[11px] font-semibold truncate leading-tight", isSelected ? "text-blue-900 font-extrabold" : "text-slate-800")}>
-                    {item.product.name}
-                  </span>
-                  <div className={cn("flex flex-col items-center gap-0.5 rounded px-1 py-0.5 transition-all", isEditingQty ? "bg-amber-300 ring-2 ring-amber-600 scale-105 shadow-md" : "")}>
-                    <button onClick={(e) => { e.stopPropagation(); changeQty(item.product.id, 1); }}
-                      className="w-5 h-4 bg-green-100 hover:bg-green-200 rounded text-green-700 flex items-center justify-center leading-none">
-                      <Plus className="w-2.5 h-2.5" />
-                    </button>
-                    <span className={cn("text-[12px] font-extrabold tabular-nums", isEditingQty ? "text-amber-950 text-sm font-black underline" : "text-slate-800")}>
-                      {item.quantity}
-                    </span>
-                    <button onClick={(e) => { e.stopPropagation(); changeQty(item.product.id, -1); }}
-                      className="w-5 h-4 bg-red-100 hover:bg-red-200 rounded text-red-600 flex items-center justify-center leading-none">
-                      <Minus className="w-2.5 h-2.5" />
-                    </button>
-                  </div>
-                  <span className="text-[11px] font-bold text-amber-700 text-center tabular-nums">
-                    {(item.product.price * item.quantity).toLocaleString()}
-                  </span>
-                  <button onClick={(e) => { e.stopPropagation(); removeFromCart(item.product.id); }}
-                    className="w-5 h-5 rounded hover:bg-red-100 flex items-center justify-center text-red-400">
-                    <X className="w-3 h-3" />
+            {cart.map((item, idx) => (
+              <div key={item.product.id}
+                onClick={() => { setSelectedCartIndex(idx); setIsQtyEditing(false); }}
+                className={cn("grid grid-cols-[1fr_40px_70px_24px] items-center px-2 py-1 gap-0.5 cursor-pointer transition-colors",
+                  idx % 2 === 0 ? "bg-white" : "bg-amber-50/60",
+                  selectedCartIndex === idx && "bg-blue-100 ring-1 ring-blue-500 font-bold")}
+              >
+                <span className={cn("text-[11px] font-semibold text-slate-800 truncate leading-tight", selectedCartIndex === idx && "font-black text-blue-900")}>{item.product.name}</span>
+                <div className={cn("flex flex-col items-center gap-0.5 rounded px-1 py-0.5", selectedCartIndex === idx && isQtyEditing && "bg-amber-300 ring-2 ring-amber-600 animate-pulse")}>
+                  <button onClick={(e) => { e.stopPropagation(); setSelectedCartIndex(idx); changeQty(item.product.id, 1); }}
+                    className="w-5 h-4 bg-green-100 hover:bg-green-200 rounded text-green-700 flex items-center justify-center leading-none">
+                    <Plus className="w-2.5 h-2.5" />
+                  </button>
+                  <span className="text-[12px] font-extrabold text-slate-800 tabular-nums">{item.quantity}</span>
+                  <button onClick={(e) => { e.stopPropagation(); setSelectedCartIndex(idx); changeQty(item.product.id, -1); }}
+                    className="w-5 h-4 bg-red-100 hover:bg-red-200 rounded text-red-600 flex items-center justify-center leading-none">
+                    <Minus className="w-2.5 h-2.5" />
                   </button>
                 </div>
-              );
-            })}
+                <span className="text-[11px] font-bold text-amber-700 text-center tabular-nums">
+                  {(item.product.price * item.quantity).toLocaleString()}
+                </span>
+                <button onClick={(e) => { e.stopPropagation(); removeFromCart(item.product.id); }}
+                  className="w-5 h-5 rounded hover:bg-red-100 flex items-center justify-center text-red-400">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
           </div>
 
           {/* ── Note ── */}
@@ -854,23 +1178,44 @@ export default function Pos() {
         {/* ═══ MAIN: Products panel ═══ */}
         <div className="flex-1 flex flex-col overflow-hidden">
 
-          {/* ── Top bar: direct number typing info + meal mode ── */}
+          {/* ── Top bar: quick typing + meal mode ── */}
           <div className="bg-[#0f1e3c] border-b border-slate-700 flex items-center gap-3 px-3 py-1.5 shrink-0 flex-wrap">
             {!mealMode ? (
               <>
-                <span className="text-white/60 text-xs font-medium">اكتب رقم الوجبة بالكيبورد مباشرة + Enter:</span>
-                {typedCode ? (
-                  <span className="bg-amber-400 text-slate-950 font-black px-2.5 py-0.5 rounded text-sm animate-pulse tracking-wider">
-                    {typedCode} ↵
+                <div className="flex items-center gap-2 text-white text-xs font-bold">
+                  <span className="text-amber-400">⌨️ رقم صنف سريع:</span>
+                  <span className="bg-white/10 px-2 py-0.5 rounded font-mono text-amber-200 text-sm font-black min-w-[50px] text-center" dir="ltr">
+                    {typedNumberBuffer || "—"}
                   </span>
-                ) : (
-                  <span className="text-amber-300 text-xs font-semibold">جاهز للاختيار</span>
-                )}
+                </div>
                 {cart.length > 0 && (
-                  <span className="text-amber-300 text-xs font-bold mr-2">
+                  <span className="text-amber-300 text-xs font-bold">
                     {cart.length} صنف — {total.toFixed(0)} {currency}
                   </span>
                 )}
+                {offlineJobsCount > 0 && (
+                  <button
+                    onClick={retryOfflineQueue}
+                    className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold bg-amber-500 text-white rounded animate-pulse hover:bg-amber-600 transition-colors"
+                    title="انقر لإعادة محاولة طباعة الفواتير المعلقة"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>فواتير معلقة ({offlineJobsCount}) — إعادة طباعة</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowQZTrayDialog(true)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded transition-colors border",
+                    qz.connected
+                      ? "bg-emerald-600/30 text-emerald-200 border-emerald-500/50 hover:bg-emerald-600/40"
+                      : "bg-red-600/30 text-red-200 border-red-500/50 hover:bg-red-600/40 animate-pulse"
+                  )}
+                  title="حالة نظام الطباعة QZ Tray"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>QZ Tray: {qz.connected ? "متصل" : "غير متصل"}</span>
+                </button>
                 <button
                   onClick={() => setMealMode(true)}
                   className="mr-auto flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-amber-300 border border-amber-400/30 rounded hover:bg-amber-400/10 transition-colors"
@@ -941,6 +1286,22 @@ export default function Pos() {
               )}
             </div>
           </div>
+
+          {/* ── Keyboard Shortcuts Guide Bar ── */}
+          <div className="bg-[#0b1528] text-white/70 text-[10px] px-3 py-1 flex items-center justify-between border-t border-slate-800 shrink-0 select-none overflow-x-auto gap-2">
+            <span className="font-bold text-blue-300">⌨️ اختصارات لوحة المفاتيح:</span>
+            <div className="flex items-center gap-3">
+              <span><kbd className="bg-slate-800 text-white px-1 rounded text-[9px] font-mono border border-slate-700">رقم+Enter</kbd> إضافة صنف</span>
+              <span><kbd className="bg-slate-800 text-white px-1 rounded text-[9px] font-mono border border-slate-700">↑↓</kbd> تنقل</span>
+              <span><kbd className="bg-slate-800 text-white px-1 rounded text-[9px] font-mono border border-slate-700">←→</kbd> تعديل كمية</span>
+              <span><kbd className="bg-slate-800 text-white px-1 rounded text-[9px] font-mono border border-slate-700">Enter x2</kbd> دفع</span>
+              <span><kbd className="bg-slate-800 text-white px-1 rounded text-[9px] font-mono border border-slate-700">F2</kbd> دفع</span>
+              <span><kbd className="bg-slate-800 text-white px-1 rounded text-[9px] font-mono border border-slate-700">F3</kbd> مسح</span>
+              <span><kbd className="bg-slate-800 text-white px-1 rounded text-[9px] font-mono border border-slate-700">F4</kbd> نوع الطلب</span>
+              <span><kbd className="bg-slate-800 text-white px-1 rounded text-[9px] font-mono border border-slate-700">F5</kbd> موظف</span>
+              <span><kbd className="bg-slate-800 text-white px-1 rounded text-[9px] font-mono border border-slate-700">F8</kbd> طباعة</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -962,6 +1323,12 @@ export default function Pos() {
                   type="number"
                   value={cashGiven}
                   onChange={e => setCashGiven(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      confirmPay();
+                    }
+                  }}
                   placeholder="0"
                   className="text-center text-xl font-bold h-12"
                   dir="ltr"
@@ -1094,6 +1461,12 @@ export default function Pos() {
             <Input
               value={reprintReason}
               onChange={e => setReprintReason(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter" && reprintReason.trim()) {
+                  e.preventDefault();
+                  confirmReprint();
+                }
+              }}
               placeholder="مثال: الفاتورة تالفة، طلب العميل..."
               autoFocus
             />
@@ -1103,6 +1476,25 @@ export default function Pos() {
             <Button onClick={confirmReprint} disabled={!reprintReason.trim()}>
               <Printer className="w-4 h-4 me-2" />
               طباعة
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* QZ Tray Settings & Diagnostics Dialog */}
+      <Dialog open={showQZTrayDialog} onOpenChange={setShowQZTrayDialog}>
+        <DialogContent className="max-w-lg bg-slate-900 border-slate-800 text-white p-0 overflow-hidden" dir="rtl">
+          <DialogHeader className="p-4 bg-slate-950 border-b border-slate-800">
+            <DialogTitle className="flex items-center gap-2 text-sm text-emerald-400">
+              <Printer className="w-4 h-4" />
+              <span>إدارة وربط طابعات QZ Tray الحرارية</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="p-4">
+            <QZTrayWidget />
+          </div>
+          <DialogFooter className="p-3 bg-slate-950 border-t border-slate-800 flex justify-end">
+            <Button variant="outline" size="sm" onClick={() => setShowQZTrayDialog(false)} className="bg-slate-800 text-white border-slate-700 hover:bg-slate-700">
+              إغلاق
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -133,7 +133,7 @@ function EmployeesTab() {
 
   const saveMut = useMutation({
     mutationFn: (f: typeof form) => {
-      const data = { ...f, department_id: f.department_id ? Number(f.department_id) : null, basic_salary: Number(f.basic_salary) };
+      const data = { ...f, department_id: (f.department_id && f.department_id !== "none") ? Number(f.department_id) : null, basic_salary: Number(f.basic_salary) };
       return editing ? apiPut(`/api/hr/employees/${editing.id}`, data) : apiPost("/api/hr/employees", data);
     },
     onSuccess: () => { invalidate(); setShowDlg(false); toast({ title: editing ? "تم التعديل" : "تمت الإضافة" }); },
@@ -146,7 +146,18 @@ function EmployeesTab() {
     onError: () => toast({ variant: "destructive", title: "فشل في الحذف" }),
   });
 
-  const openAdd = () => { setEditing(null); setForm(emptyForm); setShowDlg(true); };
+  const openAdd = () => { 
+    setEditing(null); 
+    const maxNum = (employees as any[]).length > 0
+      ? Math.max(...(employees as any[]).map((e: any) => {
+          const m = e.employee_number?.match(/\d+/);
+          return m ? parseInt(m[0], 10) : 0;
+        }), 0)
+      : 0;
+    const nextEmpNo = `EMP-${String(maxNum + 1).padStart(4, '0')}`;
+    setForm({ ...emptyForm, employee_number: nextEmpNo }); 
+    setShowDlg(true); 
+  };
   const openEdit = (e: any) => { setEditing(e); setForm({ employee_number: e.employee_number, name: e.name, phone: e.phone ?? "", position: e.position ?? "", department_id: e.department_id ? String(e.department_id) : "", basic_salary: String(e.basic_salary), hire_date: e.hire_date ?? "", active: Boolean(e.active) }); setShowDlg(true); };
 
   return (
@@ -195,15 +206,18 @@ function EmployeesTab() {
         <DialogContent className="max-w-lg" dir="rtl">
           <DialogHeader><DialogTitle>{editing ? "تعديل موظف" : "إضافة موظف"}</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-sm font-medium">رقم الموظف *</label><Input value={form.employee_number} onChange={e => setForm(f => ({ ...f, employee_number: e.target.value }))} placeholder="EMP-001" className="mt-1" /></div>
+            <div><label className="text-sm font-medium">رقم الموظف (تلقائي)</label><Input value={form.employee_number} onChange={e => setForm(f => ({ ...f, employee_number: e.target.value }))} placeholder="EMP-001" className="mt-1" /></div>
             <div><label className="text-sm font-medium">الاسم *</label><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="اسم الموظف" className="mt-1" /></div>
-            <div><label className="text-sm font-medium">رقم الهاتف</label><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="05xxxxxxxx" className="mt-1" /></div>
+            <div><label className="text-sm font-medium">رقم الهاتف (اختياري)</label><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="05xxxxxxxx" className="mt-1" /></div>
             <div><label className="text-sm font-medium">المنصب الوظيفي</label><Input value={form.position} onChange={e => setForm(f => ({ ...f, position: e.target.value }))} placeholder="مثال: محاسب" className="mt-1" /></div>
             <div>
-              <label className="text-sm font-medium">القسم</label>
-              <Select value={form.department_id} onValueChange={v => setForm(f => ({ ...f, department_id: v }))}>
+              <label className="text-sm font-medium">القسم (اختياري)</label>
+              <Select value={form.department_id || "none"} onValueChange={v => setForm(f => ({ ...f, department_id: v === "none" ? "" : v }))}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="اختر القسم" /></SelectTrigger>
-                <SelectContent>{(depts as any[]).map((d: any) => <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>)}</SelectContent>
+                <SelectContent>
+                  <SelectItem value="none">بدون قسم (اختياري)</SelectItem>
+                  {(depts as any[]).map((d: any) => <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>)}
+                </SelectContent>
               </Select>
             </div>
             <div><label className="text-sm font-medium">الراتب الأساسي</label><Input type="number" value={form.basic_salary} onChange={e => setForm(f => ({ ...f, basic_salary: e.target.value }))} placeholder="0" className="mt-1" /></div>
@@ -215,7 +229,7 @@ function EmployeesTab() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDlg(false)}>إلغاء</Button>
-            <Button onClick={() => saveMut.mutate(form)} disabled={!form.employee_number || !form.name || saveMut.isPending}>حفظ</Button>
+            <Button onClick={() => saveMut.mutate(form)} disabled={!form.name || saveMut.isPending}>حفظ</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

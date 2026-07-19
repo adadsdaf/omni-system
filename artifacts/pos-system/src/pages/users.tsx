@@ -10,10 +10,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2 } from "lucide-react";
+import { useAuth } from "@/components/auth-provider";
 
-type FormData = { username: string; name: string; role: "admin" | "cashier"; password: string; active: boolean };
+type FormData = { username: string; name: string; role: "developer" | "admin" | "cashier" | "accountant"; password: string; active: boolean };
 
 export default function Users() {
+  const { user: currentUser } = useAuth();
   const { data: users = [], isLoading } = useGetUsers();
   const createMutation = useCreateUser();
   const updateMutation = useUpdateUser();
@@ -25,7 +27,15 @@ export default function Users() {
   const [form, setForm] = useState<FormData>({ username: "", name: "", role: "cashier", password: "", active: true });
 
   const openAdd = () => { setEditing(null); setForm({ username: "", name: "", role: "cashier", password: "", active: true }); setShowDialog(true); };
-  const openEdit = (u: User) => { setEditing(u); setForm({ username: u.username, name: u.name, role: u.role, password: "", active: u.active }); setShowDialog(true); };
+  const openEdit = (u: User) => {
+    if (u.role === "developer" && currentUser?.role !== "developer") {
+      toast({ variant: "destructive", title: "غير مصرح بالتعديل على حساب المطور" });
+      return;
+    }
+    setEditing(u);
+    setForm({ username: u.username, name: u.name, role: u.role as any, password: "", active: u.active });
+    setShowDialog(true);
+  };
 
   const invalidate = () => qc.invalidateQueries({ queryKey: getGetUsersQueryKey() });
 
@@ -47,6 +57,10 @@ export default function Users() {
   };
 
   const handleDelete = (u: User) => {
+    if (u.role === "developer" && currentUser?.role !== "developer") {
+      toast({ variant: "destructive", title: "غير مصرح بحذف حساب المطور" });
+      return;
+    }
     if (!confirm(`حذف المستخدم "${u.name}"؟`)) return;
     deleteMutation.mutate({ id: u.id }, {
       onSuccess: invalidate,
@@ -81,8 +95,8 @@ export default function Users() {
                     <td className="p-3 font-medium">{u.name}</td>
                     <td className="p-3 font-mono text-muted-foreground">{u.username}</td>
                     <td className="p-3">
-                      <Badge variant={u.role === "admin" ? "default" : "secondary"}>
-                        {u.role === "admin" ? "مدير" : "كاشير"}
+                      <Badge variant={u.role === "admin" || u.role === "developer" ? "default" : "secondary"}>
+                        {u.role === "developer" ? "مطور النظام" : u.role === "admin" ? "مدير النظام" : u.role === "accountant" ? "محاسب" : "كاشير"}
                       </Badge>
                     </td>
                     <td className="p-3">
@@ -124,10 +138,12 @@ export default function Users() {
             <div className="space-y-1">
               <label className="text-sm font-medium">الدور</label>
               <div className="flex gap-2">
-                {(["admin","cashier"] as const).map(r => (
-                  <button key={r} onClick={() => setForm({ ...form, role: r })}
+                {(currentUser?.role === "developer"
+                  ? (["developer", "admin", "accountant", "cashier"] as const)
+                  : (["admin", "accountant", "cashier"] as const)).map((r: "developer" | "admin" | "accountant" | "cashier") => (
+                  <button key={r} type="button" onClick={() => setForm({ ...form, role: r })}
                     className={`flex-1 py-2 rounded border text-sm ${form.role === r ? "bg-primary text-primary-foreground border-primary" : "border-border"}`}>
-                    {r === "admin" ? "مدير" : "كاشير"}
+                    {r === "developer" ? "مطور" : r === "admin" ? "مدير" : r === "accountant" ? "محاسب" : "كاشير"}
                   </button>
                 ))}
               </div>

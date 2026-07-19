@@ -26,31 +26,49 @@ function fmt(n?: number) { return Number(n ?? 0).toLocaleString("ar-SA", { minim
 function NewReturnDialog({ open, onClose, onSuccess }: { open: boolean; onClose: () => void; onSuccess: () => void }) {
   const { toast } = useToast();
   const [invoiceSearch, setInvoiceSearch] = useState("");
-  const [foundOrder, setFoundOrder] = useState<any>(null);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [searching, setSearching] = useState(false);
-  const [selectedItems, setSelectedItems] = useState<Record<number, { selected: boolean; qty: number }>>({});
-  const [reason, setReason] = useState("");
+  const [selectedItems, setSelectedItems] = useState<Record<number, { selected: boolean; qty: number; returnToStock: boolean }>>({});
+  const [reason, setReason] = useState("خطأ في الطلب");
+  const [customReason, setCustomReason] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [notes, setNotes] = useState("");
 
-  const searchOrder = async () => {
+  const searchOrders = async () => {
     if (!invoiceSearch.trim()) return;
     setSearching(true);
     try {
       const data = await apiGet(`/api/orders/lookup?q=${encodeURIComponent(invoiceSearch.trim())}`);
-      setFoundOrder(data);
-      // تحديد جميع العناصر بالكمية الكاملة افتراضياً
-      const sel: Record<number, { selected: boolean; qty: number }> = {};
-      (data.items ?? []).forEach((item: any, idx: number) => {
-        sel[idx] = { selected: true, qty: item.quantity };
-      });
-      setSelectedItems(sel);
+      setSearchResults(data);
+      if (data.length === 0) {
+        toast({ variant: "destructive", title: "لا توجد نتائج", description: "لم يتم العثور على أي فاتورة تطابق بحثك." });
+      } else if (data.length === 1) {
+        // إذا كانت هناك نتيجة واحدة فقط، اخترها تلقائياً لتسريع العمل
+        selectOrder(data[0]);
+      }
     } catch (e: any) {
-      setFoundOrder(null);
-      toast({ variant: "destructive", title: "لم يتم العثور على الفاتورة", description: e.message });
+      setSearchResults([]);
+      toast({ variant: "destructive", title: "فشل البحث", description: e.message });
     } finally {
       setSearching(false);
     }
+  };
+
+  const selectOrder = (order: any) => {
+    setSelectedOrder(order);
+    setPaymentMethod(order.paymentMethod || "cash");
+    
+    // تحديد جميع العناصر بالكمية الكاملة المتبقية افتراضياً
+    const sel: Record<number, { selected: boolean; qty: number; returnToStock: boolean }> = {};
+    (order.items ?? []).forEach((item: any, idx: number) => {
+      sel[idx] = { 
+        selected: item.remainingQuantity > 0, 
+        qty: item.remainingQuantity, 
+        returnToStock: true 
+      };
+    });
+    setSelectedItems(sel);
   };
 
   const toggleItem = (idx: number) => {
@@ -61,182 +79,350 @@ function NewReturnDialog({ open, onClose, onSuccess }: { open: boolean; onClose:
   };
 
   const setQty = (idx: number, qty: number) => {
-    const maxQty = foundOrder?.items?.[idx]?.quantity ?? 1;
+    const maxQty = selectedOrder?.items?.[idx]?.remainingQuantity ?? 1;
     setSelectedItems(prev => ({
       ...prev,
       [idx]: { ...prev[idx], qty: Math.max(1, Math.min(qty, maxQty)) },
     }));
   };
 
-  const selectedTotal = foundOrder?.items
-    ? foundOrder.items.reduce((sum: number, item: any, idx: number) => {
+  const toggleReturnToStock = (idx: number) => {
+    setSelectedItems(prev => ({
+      ...prev,
+      [idx]: { ...prev[idx], returnToStock: !prev[idx]?.returnToStock },
+    }));
+  };
+
+  // إرجاع الفاتورة بالكامل
+  const handleReturnAll = () => {
+    if (!selectedOrder) return;
+    const sel: Record<number, { selected: boolean; qty: number; returnToStock: boolean }> = {};
+    (selectedOrder.items ?? []).forEach((item: any, idx: number) => {
+      if (item.remainingQuantity > 0) {
+        sel[idx] = { selected: true, qty: item.remainingQuantity, returnToStock: true };
+      }
+    });
+    setSelectedItems(sel);
+    toast({ title: "تم تحديد الفاتورة بالكامل", description: "تم تحديد جميع الكميات المتبقية للإرجاع." });
+  };
+
+  const selectedTotal = selectedOrder?.items
+    ? selectedOrder.items.reduce((sum: number, item: any, idx: number) => {
         const sel = selectedItems[idx];
         if (!sel?.selected) return sum;
-        return sum + item.unitPrice * (sel.qty ?? item.quantity);
+        return sum + item.unitPrice * (sel.qty ?? item.remainingQuantity);
       }, 0)
     : 0;
 
   const createMut = useMutation({
     mutationFn: () => {
-      const items = (foundOrder?.items ?? [])
+      const items = (selectedOrder?.items ?? [])
         .map((item: any, idx: number) => {
           const sel = selectedItems[idx];
           if (!sel?.selected) return null;
-          return { product_id: item.productId, product_name: item.productName, quantity: sel.qty, unit_price: item.unitPrice };
+          return { 
+            product_id: item.productId, 
+            product_name: item.productName, 
+            quantity: sel.qty, 
+            unit_price: item.unitPrice,
+            return_to_stock: sel.returnToStock
+          };
         })
         .filter(Boolean);
+
+      const finalReason = reason === "سبب آخر" ? customReason : reason;
+
       return apiPost("/api/returns", {
-        invoice_number: foundOrder.invoiceNumber,
-        order_id: foundOrder.id,
-        reason,
+        invoice_number: selectedOrder.invoiceNumber,
+        order_id: selectedOrder.id,
+        reason: finalReason,
         payment_method: paymentMethod,
         notes,
         items,
       });
     },
     onSuccess: () => {
-      toast({ title: "تم إنشاء المرتجع بنجاح" });
+      toast({ title: "تم اعتماد المرتجع بنجاح", description: "تم تحديث المخزن وصندوق المبيعات وسجل التدقيق تلقائياً." });
       onSuccess();
       onClose();
-      setFoundOrder(null);
+      setSelectedOrder(null);
+      setSearchResults([]);
       setInvoiceSearch("");
       setSelectedItems({});
-      setReason("");
+      setReason("خطأ في الطلب");
+      setCustomReason("");
+      setNotes("");
     },
-    onError: (e: any) => toast({ variant: "destructive", title: "فشل في إنشاء المرتجع", description: e.message }),
+    onError: (e: any) => toast({ variant: "destructive", title: "فشل في اعتماد المرتجع", description: e.message }),
   });
 
-  const canSubmit = foundOrder && !foundOrder.alreadyReturned && Object.values(selectedItems).some(s => s.selected) && !createMut.isPending;
+  const canSubmit = selectedOrder && 
+                    Object.values(selectedItems).some((s: any) => s.selected) && 
+                    (reason !== "سبب آخر" || customReason.trim().length > 0) &&
+                    !createMut.isPending;
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-2xl" dir="rtl">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><RotateCcw className="w-5 h-5" />مرتجع جديد</DialogTitle></DialogHeader>
-        <div className="space-y-4 max-h-[70vh] overflow-y-auto">
-          {/* ── بحث بالفاتورة ── */}
-          <div className="bg-muted/30 rounded-xl p-4 space-y-3">
-            <h3 className="font-semibold text-sm">البحث عن الفاتورة</h3>
-            <div className="flex gap-2">
-              <Input
-                value={invoiceSearch}
-                onChange={e => setInvoiceSearch(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && searchOrder()}
-                placeholder="أدخل رقم الفاتورة (مثال: 5 أو INV-0005)"
-                className="flex-1"
-              />
-              <Button onClick={searchOrder} disabled={searching || !invoiceSearch.trim()} className="gap-1">
-                <Search className="w-4 h-4" />{searching ? "جاري البحث..." : "بحث"}
-              </Button>
-            </div>
-
-            {foundOrder && (
-              <div className="border border-border rounded-xl overflow-hidden">
-                <div className={`p-3 flex items-center justify-between ${foundOrder.alreadyReturned ? "bg-red-50" : "bg-green-50"}`}>
-                  <div>
-                    <div className="font-bold text-sm">{foundOrder.invoiceNumber}</div>
-                    <div className="text-xs text-muted-foreground">
-                      الكاشير: {foundOrder.cashierName} | {new Date(foundOrder.createdAt).toLocaleDateString("ar-SA")}
-                    </div>
-                    {foundOrder.customerName && <div className="text-xs text-muted-foreground">العميل: {foundOrder.customerName}</div>}
-                  </div>
-                  <div className="text-left">
-                    <div className="font-bold text-lg">{fmt(foundOrder.total)}</div>
-                    {foundOrder.alreadyReturned && (
-                      <Badge variant="destructive" className="text-xs flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3" />تم إرجاعها
-                      </Badge>
-                    )}
-                  </div>
+      <DialogContent className="max-w-3xl" dir="rtl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <RotateCcw className="w-5 h-5 text-primary" />
+            إدارة وإنشاء المرتجعات (المحاسب / المدير)
+          </DialogTitle>
+        </DialogHeader>
+        
+        <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+          {/* ── حالة البحث واختيار الفاتورة ── */}
+          {!selectedOrder ? (
+            <div className="space-y-4">
+              <div className="bg-muted/30 rounded-xl p-4 space-y-3 border border-border">
+                <h3 className="font-semibold text-sm text-foreground">البحث عن الفاتورة الأصلية لعمل مرتجع</h3>
+                <p className="text-xs text-muted-foreground">
+                  يمكنك البحث بواسطة: رقم الفاتورة (مثال: INV-0005)، أو باركود صنف، أو تاريخ البيع (YYYY-MM-DD)، أو اسم الكاشير.
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    value={invoiceSearch}
+                    onChange={e => setInvoiceSearch(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && searchOrders()}
+                    placeholder="ابحث برقم الفاتورة، الباركود، التاريخ، أو اسم الكاشير..."
+                    className="flex-1"
+                  />
+                  <Button onClick={searchOrders} disabled={searching || !invoiceSearch.trim()} className="gap-1">
+                    <Search className="w-4 h-4" />{searching ? "جاري البحث..." : "بحث"}
+                  </Button>
                 </div>
+              </div>
 
-                {foundOrder.alreadyReturned && foundOrder.existingReturn && (
-                  <div className="p-3 bg-red-50 border-t border-red-100 text-sm text-red-700">
-                    تم إرجاع هذه الفاتورة مسبقاً برقم: {foundOrder.existingReturn.return_number} | المبلغ: {fmt(foundOrder.existingReturn.total_refund)}
+              {searchResults.length > 0 && (
+                <div className="border border-border rounded-xl overflow-hidden bg-card">
+                  <div className="p-3 bg-muted/50 border-b border-border font-bold text-xs text-muted-foreground">
+                    نتائج البحث ({searchResults.length} فاتورة مطابقة):
                   </div>
-                )}
-
-                {!foundOrder.alreadyReturned && (
-                  <div className="p-3">
-                    <h4 className="text-xs font-bold text-muted-foreground mb-2">اختر الأصناف المرتجعة:</h4>
+                  <div className="max-h-60 overflow-y-auto">
                     <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="text-right py-1 pr-1 w-8"></th>
-                          <th className="text-right py-1">الصنف</th>
-                          <th className="text-center py-1 w-20">الكمية</th>
-                          <th className="text-left py-1 w-24">السعر</th>
-                          <th className="text-left py-1 w-24">الإجمالي</th>
+                      <thead className="bg-muted/20 text-xs sticky top-0">
+                        <tr className="border-b border-border">
+                          <th className="text-right p-3">رقم الفاتورة</th>
+                          <th className="text-right p-3">الكاشير</th>
+                          <th className="text-right p-3">التاريخ والوقت</th>
+                          <th className="text-right p-3">طريقة الدفع</th>
+                          <th className="text-left p-3">الإجمالي</th>
+                          <th className="p-3 w-32"></th>
                         </tr>
                       </thead>
-                      <tbody>
-                        {(foundOrder.items ?? []).map((item: any, idx: number) => {
-                          const sel = selectedItems[idx];
-                          return (
-                            <tr key={idx} className={`border-b border-dashed ${sel?.selected ? "" : "opacity-40"}`}>
-                              <td className="py-1 pr-1">
-                                <Checkbox checked={sel?.selected ?? false} onCheckedChange={() => toggleItem(idx)} />
-                              </td>
-                              <td className="py-1 font-medium">{item.productName}</td>
-                              <td className="py-1 text-center">
-                                <Input
-                                  type="number"
-                                  value={sel?.qty ?? item.quantity}
-                                  min={1}
-                                  max={item.quantity}
-                                  disabled={!sel?.selected}
-                                  onChange={e => setQty(idx, Number(e.target.value))}
-                                  className="w-16 h-7 text-center text-sm mx-auto"
-                                />
-                              </td>
-                              <td className="py-1 text-left font-mono text-xs">{fmt(item.unitPrice)}</td>
-                              <td className="py-1 text-left font-mono font-bold text-xs text-destructive">
-                                {fmt(item.unitPrice * (sel?.qty ?? item.quantity))}
-                              </td>
-                            </tr>
-                          );
-                        })}
+                      <tbody className="divide-y divide-border">
+                        {searchResults.map((order: any) => (
+                          <tr key={order.id} className="hover:bg-muted/30 transition-colors">
+                            <td className="p-3 font-mono font-bold text-primary">{order.invoiceNumber}</td>
+                            <td className="p-3">{order.cashierName}</td>
+                            <td className="p-3 text-xs text-muted-foreground">
+                              {new Date(order.createdAt).toLocaleString("ar-SA")}
+                            </td>
+                            <td className="p-3 text-xs">
+                              <Badge variant="outline">{order.paymentMethod === "cash" ? "نقداً" : order.paymentMethod === "card" ? "شبكة" : "أخرى"}</Badge>
+                            </td>
+                            <td className="p-3 font-mono font-bold text-left">{fmt(order.total)}</td>
+                            <td className="p-3 text-center">
+                              {order.fullyReturned ? (
+                                <Badge variant="destructive" className="text-xs">مرتجعة بالكامل</Badge>
+                              ) : (
+                                <Button size="sm" variant="secondary" onClick={() => selectOrder(order)} className="w-full text-xs py-1 h-8">
+                                  {order.alreadyReturned ? "تعديل / مرتجع جزئي" : "اختيار الفاتورة"}
+                                </Button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
-                    <div className="flex justify-between items-center mt-2 pt-2 border-t font-bold">
-                      <span>إجمالي المبلغ المسترد:</span>
-                      <span className="text-destructive text-lg">{fmt(selectedTotal)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* ── حالة الفاتورة المحددة وتفاصيل المرتجع ── */
+            <div className="space-y-4">
+              <div className="border border-border rounded-xl overflow-hidden bg-card">
+                <div className="p-4 bg-muted/40 border-b border-border flex justify-between items-center flex-wrap gap-2">
+                  <div>
+                    <h3 className="font-extrabold text-sm text-primary flex items-center gap-2">
+                      بيانات الفاتورة الأصلية: {selectedOrder.invoiceNumber}
+                    </h3>
+                    <div className="text-xs text-muted-foreground mt-1 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
+                      <div><strong className="text-foreground">الكاشير:</strong> {selectedOrder.cashierName}</div>
+                      <div><strong className="text-foreground">الفرع:</strong> الفرع الرئيسي</div>
+                      <div><strong className="text-foreground">وقت البيع:</strong> {new Date(selectedOrder.createdAt).toLocaleString("ar-SA")}</div>
+                      <div><strong className="text-foreground">طريقة الدفع:</strong> {selectedOrder.paymentMethod === "cash" ? "نقداً" : "شبكة"}</div>
+                    </div>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setSelectedOrder(null)} className="text-xs">
+                    تغيير الفاتورة / بحث جديد
+                  </Button>
+                </div>
+
+                {selectedOrder.alreadyReturned && (
+                  <div className="p-3 bg-yellow-50 border-b border-yellow-100 text-xs text-yellow-800 flex flex-col gap-1">
+                    <span className="font-bold flex items-center gap-1">⚠️ تنبيه: تم عمل مرتجع سابق على هذه الفاتورة:</span>
+                    <div className="pl-4">
+                      {selectedOrder.existingReturns?.map((ret: any) => (
+                        <div key={ret.id}>
+                          • سند رقم: <span className="font-mono font-bold">{ret.return_number}</span> بقيمة <span className="font-bold">{fmt(ret.total_refund)} ريال</span> في تاريخ {new Date(ret.created_at).toLocaleDateString("ar-SA")}
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
-              </div>
-            )}
-          </div>
 
-          {/* ── تفاصيل المرتجع ── */}
-          {foundOrder && !foundOrder.alreadyReturned && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-sm font-medium">سبب الإرجاع</label>
-                <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="مثال: منتج معيب" className="mt-1" />
+                <div className="p-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <h4 className="text-xs font-bold text-muted-foreground">تحديد المنتجات والكميات المرتجعة:</h4>
+                    <Button type="button" variant="outline" size="sm" onClick={handleReturnAll} className="text-xs py-1 h-7">
+                      إرجاع الفاتورة بالكامل
+                    </Button>
+                  </div>
+                  
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-xs text-muted-foreground">
+                        <th className="text-right py-2 pr-1 w-8"></th>
+                        <th className="text-right py-2">الصنف</th>
+                        <th className="text-center py-2 w-20">الكمية الأصلية</th>
+                        <th className="text-center py-2 w-24">مسترجع سابقاً</th>
+                        <th className="text-center py-2 w-24">الكمية المرتجعة</th>
+                        <th className="text-center py-2 w-28">إعادة للمخزن؟</th>
+                        <th className="text-left py-2 w-24">سعر الوحدة</th>
+                        <th className="text-left py-2 w-24">إجمالي المرتجع</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {(selectedOrder.items ?? []).map((item: any, idx: number) => {
+                        const sel = selectedItems[idx];
+                        const isAvailable = item.remainingQuantity > 0;
+                        
+                        return (
+                          <tr key={idx} className={`hover:bg-muted/10 transition-colors ${sel?.selected ? "" : "opacity-50"}`}>
+                            <td className="py-2 pr-1">
+                              <Checkbox 
+                                checked={sel?.selected ?? false} 
+                                disabled={!isAvailable}
+                                onCheckedChange={() => toggleItem(idx)} 
+                              />
+                            </td>
+                            <td className="py-2">
+                              <div className="font-medium text-foreground">{item.productName}</div>
+                            </td>
+                            <td className="py-2 text-center font-mono">{item.quantity}</td>
+                            <td className="py-2 text-center font-mono text-amber-600">
+                              {item.returnedQuantity > 0 ? item.returnedQuantity : "—"}
+                            </td>
+                            <td className="py-2 text-center">
+                              <Input
+                                type="number"
+                                value={sel?.qty ?? item.remainingQuantity}
+                                min={1}
+                                max={item.remainingQuantity}
+                                disabled={!sel?.selected || !isAvailable}
+                                onChange={e => setQty(idx, Number(e.target.value))}
+                                className="w-16 h-8 text-center text-sm mx-auto"
+                              />
+                            </td>
+                            <td className="py-2 text-center">
+                              <Checkbox
+                                checked={sel?.returnToStock ?? true}
+                                disabled={!sel?.selected}
+                                onCheckedChange={() => toggleReturnToStock(idx)}
+                              />
+                              <span className="text-xs text-muted-foreground mr-1">نعم</span>
+                            </td>
+                            <td className="py-2 text-left font-mono text-xs">{fmt(item.unitPrice)}</td>
+                            <td className="py-2 text-left font-mono font-bold text-xs text-destructive">
+                              {fmt(item.unitPrice * (sel?.qty ?? item.remainingQuantity))}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  
+                  <div className="flex justify-between items-center mt-4 pt-3 border-t border-border font-bold">
+                    <span className="text-foreground">إجمالي المبلغ المراد استرداده:</span>
+                    <span className="text-destructive text-xl font-black">{fmt(selectedTotal)} ريال</span>
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="text-sm font-medium">طريقة استرداد المبلغ</label>
-                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cash">نقداً</SelectItem>
-                    <SelectItem value="card">شبكة</SelectItem>
-                    <SelectItem value="credit">رصيد للعميل</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="col-span-2">
-                <label className="text-sm font-medium">ملاحظات</label>
-                <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="اختيارية" className="mt-1" />
+
+              {/* ── خيارات تفاصيل المرتجع والاعتماد ── */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-muted/20 p-4 rounded-xl border border-border">
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-foreground mb-1 block">سبب المرتجع *</label>
+                    <Select value={reason} onValueChange={setReason}>
+                      <SelectTrigger className="w-full bg-background"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="خطأ في الطلب">خطأ في الطلب</SelectItem>
+                        <SelectItem value="المنتج تالف">المنتج تالف</SelectItem>
+                        <SelectItem value="العميل ألغى الطلب">العميل ألغى الطلب</SelectItem>
+                        <SelectItem value="تم احتساب المنتج مرتين">تم احتساب المنتج مرتين</SelectItem>
+                        <SelectItem value="سبب آخر">سبب آخر (أدخل نص مخصص)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {reason === "سبب آخر" && (
+                    <div>
+                      <label className="text-xs font-bold text-foreground mb-1 block">يرجى كتابة سبب الإرجاع بالتفصيل *</label>
+                      <Input
+                        value={customReason}
+                        onChange={e => setCustomReason(e.target.value)}
+                        placeholder="اكتب السبب المخصص هنا..."
+                        required
+                        className="bg-background"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-foreground mb-1 block">طريقة استرداد المبلغ</label>
+                    <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                      <SelectTrigger className="w-full bg-background"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cash">نقداً (من الصندوق)</SelectItem>
+                        <SelectItem value="card">شبكة (بطاقة بنكية)</SelectItem>
+                        <SelectItem value="credit">رصيد للعميل</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-foreground mb-1 block">ملاحظات المحاسب / المدير</label>
+                    <Input
+                      value={notes}
+                      onChange={e => setNotes(e.target.value)}
+                      placeholder="ملاحظات إضافية اختيارية..."
+                      className="bg-background"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>إلغاء</Button>
-          <Button onClick={() => createMut.mutate()} disabled={!canSubmit} className="gap-2">
-            <RotateCcw className="w-4 h-4" />تأكيد المرتجع
-          </Button>
+        
+        <DialogFooter className="gap-2 border-t pt-3 border-border">
+          <Button variant="outline" onClick={onClose}>إلغاء وإغلاق</Button>
+          {selectedOrder && (
+            <Button 
+              onClick={() => createMut.mutate()} 
+              disabled={!canSubmit || createMut.isPending} 
+              className="gap-2 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              <RotateCcw className="w-4 h-4" />
+              {createMut.isPending ? "جاري الحفظ..." : "اعتماد المرتجع وإصدار السند"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
