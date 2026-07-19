@@ -392,13 +392,9 @@ function printViaSystem(printerName: string, content: string, copies: number): v
 function printViaTcp(host: string, port: number, content: string, copies: number): Promise<void> {
   return new Promise((resolve, reject) => {
     let sent = 0;
-    // Standard ESC/POS paper-cut codes to support all printer models:
-    // - \x1D\x56\x42\x00: GS V 66 0 (Feed & Partial cut)
-    // - \x1D\x56\x01: GS V 1 (Partial cut)
-    // - \x1B\x69: ESC i (Epson Full cut)
-    // - \x1B\x6D: ESC m (Star/Epson Partial cut)
-    const cutCommand = "\n\n\n\x1D\x56\x42\x00\x1D\x56\x01\x1B\x69\x1B\x6D";
-    const contentWithCut = content.includes("\x1D\x56\x42\x00") ? content : content + cutCommand;
+    // Standard ESC/POS paper cut sequence: GS V 66 0 (ASCII: \x1D\x56\x42\x00)
+    const cutCommand = "\x1D\x56\x42\x00";
+    const contentWithCut = content.endsWith(cutCommand) ? content : content + "\n\n" + cutCommand;
 
     function sendCopy() {
       if (sent >= copies) { resolve(); return; }
