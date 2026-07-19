@@ -1,73 +1,57 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
-import { tablesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, logAudit } from "../lib/sqlite";
+import { getAuthUser } from "./auth";
 
 const router = Router();
 
-router.get("/tables", async (req, res) => {
+function requireAuth(req: any, res: any): any {
+  const user = getAuthUser(req);
+  if (!user) { res.status(401).json({ error: "غير مصرح" }); return null; }
+  return user;
+}
+
+router.get("/tables", (req, res) => {
+  const tables = db.prepare("SELECT * FROM restaurant_tables ORDER BY table_number").all();
+  res.json(tables);
+});
+
+router.post("/tables", (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) return;
+  const { table_number, capacity, section } = req.body;
+  if (!table_number) { res.status(400).json({ error: "رقم الطاولة مطلوب" }); return; }
   try {
-    const { status } = req.query;
-    let rows = await db.select().from(tablesTable).orderBy(tablesTable.number);
-    if (status) rows = rows.filter((t) => t.status === status);
-    res.json(rows);
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
+    const r = db.prepare("INSERT INTO restaurant_tables (table_number, capacity, section, status) VALUES (?,?,?, 'available')")
+      .run(table_number, capacity ?? 4, section ?? "الرئيسية");
+    logAudit(user.id, user.name, "إضافة طاولة", `طاولة رقم ${table_number}`);
+    res.status(201).json({ id: r.lastInsertRowid, table_number, capacity: capacity ?? 4, section: section ?? "الرئيسية", status: "available" });
+  } catch (e: any) {
+    res.status(400).json({ error: "رقم الطاولة موجود مسبقاً" });
   }
 });
 
-router.post("/tables", async (req, res) => {
-  try {
-    const { number, name, capacity, section } = req.body;
-    const [table] = await db.insert(tablesTable).values({ number: Number(number), name, capacity: Number(capacity), section }).returning();
-    res.status(201).json(table);
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
+router.post("/tables/transfer", (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) return;
+  const { from_table, to_table } = req.body;
+  const t1 = db.prepare("SELECT * FROM restaurant_tables WHERE table_number=?").get(from_table) as any;
+  const t2 = db.prepare("SELECT * FROM restaurant_tables WHERE table_number=?").get(to_table) as any;
+  if (!t1 || !t2) { res.status(404).json({ error: "إحدى الطاولات غير موجودة" }); return; }
+
+  db.prepare("UPDATE restaurant_tables SET status=?, current_order_id=? WHERE id=?").run("available", null, t1.id);
+  db.prepare("UPDATE restaurant_tables SET status=?, current_order_id=? WHERE id=?").run("occupied", t1.current_order_id, t2.id);
+  if (t1.current_order_id) {
+    db.prepare("UPDATE orders SET table_number=? WHERE id=?").run(to_table, t1.current_order_id);
   }
+  logAudit(user.id, user.name, "نقل طاولة", `من ${from_table} إلى ${to_table}`);
+  res.json({ success: true });
 });
 
-router.get("/tables/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const [table] = await db.select().from(tablesTable).where(eq(tablesTable.id, id));
-    if (!table) return res.status(404).json({ error: "Not found" });
-    res.json(table);
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-router.patch("/tables/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const { number, name, capacity, status, section } = req.body;
-    const updates: Record<string, unknown> = {};
-    if (number !== undefined) updates.number = Number(number);
-    if (name !== undefined) updates.name = name;
-    if (capacity !== undefined) updates.capacity = Number(capacity);
-    if (status !== undefined) updates.status = status;
-    if (section !== undefined) updates.section = section;
-    const [table] = await db.update(tablesTable).set(updates).where(eq(tablesTable.id, id)).returning();
-    if (!table) return res.status(404).json({ error: "Not found" });
-    res.json(table);
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-router.delete("/tables/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    await db.delete(tablesTable).where(eq(tablesTable.id, id));
-    res.status(204).send();
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+router.delete("/tables/:id", (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) return;
+  db.prepare("DELETE FROM restaurant_tables WHERE id=?").run(req.params.id);
+  res.status(204).send();
 });
 
 export default router;

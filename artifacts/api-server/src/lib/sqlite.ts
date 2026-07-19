@@ -1,19 +1,147 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
+import { mkdirSync, renameSync, existsSync, unlinkSync } from "node:fs";
+
+class StatementWrapper {
+  private stmt: any;
+
+  constructor(stmt: any) {
+    this.stmt = stmt;
+  }
+
+  all(...params: any[]): any[] {
+    return this.stmt.all(...params);
+  }
+
+  get(...params: any[]): any {
+    return this.stmt.get(...params);
+  }
+
+  run(...params: any[]): { changes: number; lastInsertRowid: number } {
+    const result = this.stmt.run(...params);
+    return {
+      changes: result.changes,
+      lastInsertRowid: Number(result.lastInsertRowid)
+    };
+  }
+}
+
+class DatabaseWrapper {
+  private db: DatabaseSync;
+
+  constructor(filename: string) {
+    this.db = new DatabaseSync(filename);
+  }
+
+  prepare(sql: string) {
+    const stmt = this.db.prepare(sql);
+    return new StatementWrapper(stmt);
+  }
+
+  exec(sql: string) {
+    return this.db.exec(sql);
+  }
+
+  pragma(sql: string) {
+    this.db.exec(`PRAGMA ${sql}`);
+  }
+
+  transaction(fn: (...args: any[]) => any) {
+    return (...args: any[]) => {
+      this.db.exec("BEGIN TRANSACTION");
+      try {
+        const result = fn(...args);
+        this.db.exec("COMMIT");
+        return result;
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    };
+  }
+
+  close() {
+    this.db.close();
+  }
+}
 
 const workspaceRoot = process.cwd().endsWith(path.join("artifacts", "api-server"))
   ? path.resolve(process.cwd(), "../..")
   : process.cwd();
 
-const dbPath = path.resolve(workspaceRoot, "artifacts/api-server/data/pos.db");
+const dbPath = process.env.DB_PATH || path.resolve(workspaceRoot, "artifacts/api-server/data/pos.db");
 
-import { mkdirSync } from "node:fs";
 mkdirSync(path.dirname(dbPath), { recursive: true });
 
-export const db = new Database(dbPath);
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
+let dbInstance: DatabaseWrapper;
+try {
+  dbInstance = new DatabaseWrapper(dbPath);
+  dbInstance.pragma("journal_mode = WAL");
+  dbInstance.pragma("foreign_keys = ON");
+  const integrity = dbInstance.prepare("PRAGMA integrity_check").get() as any;
+  const resVal = integrity ? Object.values(integrity)[0] : "ok";
+  if (resVal !== "ok") {
+    throw new Error("Database integrity check failed: " + JSON.stringify(integrity));
+  }
+} catch (err: any) {
+  console.error("Database connection/corruption error:", err);
+  if (
+    err?.message?.includes("malformed") ||
+    err?.code === "SQLITE_CORRUPT" ||
+    err?.message?.includes("corrupt") ||
+    err?.message?.includes("integrity check")
+  ) {
+    if (dbInstance) {
+      try {
+        dbInstance.close();
+      } catch (closeErr) {
+        console.error("Failed to close corrupted database:", closeErr);
+      }
+    }
+
+    const timestamp = Date.now();
+    const backupPath = `${dbPath}.corrupt.${timestamp}`;
+    const walPath = `${dbPath}-wal`;
+    const shmPath = `${dbPath}-shm`;
+    const walBackupPath = `${walPath}.corrupt.${timestamp}`;
+    const shmBackupPath = `${shmPath}.corrupt.${timestamp}`;
+
+    try {
+      if (existsSync(dbPath)) {
+        try {
+          renameSync(dbPath, backupPath);
+          console.warn(`Backed up corrupted database to ${backupPath}`);
+        } catch (renameErr) {
+          console.warn("Could not rename locked DB file. Attempting to delete instead.");
+          unlinkSync(dbPath);
+        }
+      }
+      if (existsSync(walPath)) {
+        try {
+          renameSync(walPath, walBackupPath);
+        } catch {
+          try { unlinkSync(walPath); } catch {}
+        }
+      }
+      if (existsSync(shmPath)) {
+        try {
+          renameSync(shmPath, shmBackupPath);
+        } catch {
+          try { unlinkSync(shmPath); } catch {}
+        }
+      }
+      console.warn("Cleared corrupted database files. Creating fresh database.");
+    } catch (e) {
+      console.error("Failed to backup/clear corrupted db:", e);
+    }
+  }
+  dbInstance = new DatabaseWrapper(dbPath);
+  dbInstance.pragma("journal_mode = WAL");
+  dbInstance.pragma("foreign_keys = ON");
+}
+
+export const db = dbInstance;
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -161,6 +289,37 @@ function initSchema() {
       characters_per_line INTEGER NOT NULL DEFAULT 48
     );
 
+    CREATE TABLE IF NOT EXISTS document_print_settings (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      company_name TEXT DEFAULT 'OmniSystem Pro',
+      company_subtitle TEXT DEFAULT 'نظام نقاط البيع وإدارة الموارد',
+      logo_url TEXT DEFAULT '/omnisystem-logo.png',
+      customer_header_text TEXT DEFAULT 'كشف حساب عميل معتمد',
+      customer_footer_text TEXT DEFAULT 'شكراً لتعاملكم معنا - يُرجى مراجعة الحسابات خلال 15 يوماً',
+      employee_header_text TEXT DEFAULT 'كشف حساب ومسير رواتب موظف',
+      employee_footer_text TEXT DEFAULT 'إدارة الموارد البشرية - التوقيع والاعتماد',
+      voucher_receipt_title TEXT DEFAULT 'سند قبض',
+      voucher_payment_title TEXT DEFAULT 'سند صرف',
+      voucher_footer_text TEXT DEFAULT 'المحاسب _______ المدير _______ المستلم _______',
+      report_header_text TEXT DEFAULT 'تقرير عام شامل',
+      report_footer_text TEXT DEFAULT 'طبع بواسطة نظام OmniSystem Pro',
+      accent_color TEXT DEFAULT '#2563eb'
+    );
+
+    CREATE TABLE IF NOT EXISTS stock_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      type TEXT NOT NULL, -- 'in', 'out', 'adjustment'
+      quantity REAL NOT NULL,
+      previous_stock REAL NOT NULL,
+      new_stock REAL NOT NULL,
+      reason TEXT,
+      reference_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+      user_id INTEGER,
+      user_name TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS hr_departments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -240,7 +399,179 @@ function initSchema() {
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS vouchers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      voucher_number TEXT UNIQUE NOT NULL,
+      type TEXT NOT NULL, -- 'receipt' or 'payment'
+      party_type TEXT NOT NULL, -- 'employee' or 'customer'
+      party_id INTEGER NOT NULL,
+      party_name TEXT NOT NULL,
+      amount REAL NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'دينار',
+      received_from TEXT,
+      payment_against TEXT,
+      payment_method TEXT NOT NULL DEFAULT 'cash',
+      amount_text TEXT,
+      notes TEXT,
+      header_title TEXT DEFAULT 'مخابز الشام للخبز العربي',
+      header_subtitle TEXT DEFAULT 'Maamil Al Sham',
+      logo_url TEXT DEFAULT '/omnisystem-logo.png',
+      accent_color TEXT DEFAULT '#ef4444',
+      bottom_text TEXT DEFAULT 'جودة الخبز ... سر ثقة عملائنا',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS manual_ledger_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      party_type TEXT NOT NULL, -- 'employee' or 'customer'
+      party_id INTEGER NOT NULL,
+      entry_date TEXT NOT NULL,
+      description TEXT NOT NULL,
+      debit REAL NOT NULL DEFAULT 0,
+      credit REAL NOT NULL DEFAULT 0,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS branches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      address TEXT,
+      phone TEXT,
+      active INTEGER NOT NULL DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS warehouses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      location TEXT,
+      active INTEGER NOT NULL DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS warehouse_stocks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      warehouse_id INTEGER NOT NULL REFERENCES warehouses(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      stock REAL NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      phone TEXT,
+      email TEXT,
+      address TEXT,
+      rating INTEGER NOT NULL DEFAULT 5,
+      balance REAL NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS purchase_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      po_number TEXT UNIQUE NOT NULL,
+      supplier_id INTEGER REFERENCES suppliers(id),
+      status TEXT NOT NULL DEFAULT 'pending', -- pending, received, cancelled
+      total REAL NOT NULL DEFAULT 0,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS purchase_order_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      purchase_order_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+      product_id INTEGER,
+      product_name TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      unit_price REAL NOT NULL,
+      total REAL NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS cash_shifts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      user_name TEXT NOT NULL,
+      start_time TEXT NOT NULL DEFAULT (datetime('now')),
+      end_time TEXT,
+      starting_cash REAL NOT NULL DEFAULT 0,
+      cash_sales REAL NOT NULL DEFAULT 0,
+      card_sales REAL NOT NULL DEFAULT 0,
+      withdrawals REAL NOT NULL DEFAULT 0,
+      deposits REAL NOT NULL DEFAULT 0,
+      actual_cash REAL,
+      difference REAL,
+      status TEXT NOT NULL DEFAULT 'open' -- open, closed
+    );
+
+    CREATE TABLE IF NOT EXISTS restaurant_tables (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      table_number TEXT UNIQUE NOT NULL,
+      capacity INTEGER NOT NULL DEFAULT 4,
+      status TEXT NOT NULL DEFAULT 'available', -- available, occupied, reserved
+      section TEXT DEFAULT 'الرئيسية',
+      current_order_id INTEGER REFERENCES orders(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS product_recipes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      ingredient_name TEXT NOT NULL,
+      quantity REAL NOT NULL DEFAULT 1,
+      unit TEXT NOT NULL DEFAULT 'جم'
+    );
+
+    CREATE TABLE IF NOT EXISTS product_modifiers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      price REAL NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS expenses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL, -- كهرباء، ماء، إيجار، مرتبات، تشغيل
+      amount REAL NOT NULL,
+      expense_date TEXT NOT NULL DEFAULT (date('now')),
+      notes TEXT,
+      user_id INTEGER REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS licenses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      license_key TEXT UNIQUE NOT NULL,
+      client_name TEXT NOT NULL,
+      devices_limit INTEGER NOT NULL DEFAULT 1,
+      expires_at TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS license_devices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      license_id INTEGER REFERENCES licenses(id) ON DELETE CASCADE,
+      device_id TEXT NOT NULL,
+      device_name TEXT,
+      last_active TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(license_id, device_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER REFERENCES users(id),
+      user_name TEXT,
+      action TEXT NOT NULL,
+      details TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
+}
+
+export function logAudit(userId: number, userName: string, action: string, details: string) {
+  try {
+    db.prepare("INSERT INTO audit_logs (user_id, user_name, action, details) VALUES (?,?,?,?)")
+      .run(userId ?? null, userName ?? "system", action, details);
+  } catch {}
 }
 
 function runMigrations() {
@@ -253,10 +584,34 @@ function runMigrations() {
   try { db.exec("ALTER TABLE users ADD COLUMN allow_meal_deduction INTEGER NOT NULL DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE orders ADD COLUMN is_employee_meal INTEGER NOT NULL DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE orders ADD COLUMN employee_id INTEGER"); } catch {}
+  // Ensure developer and admin users exist and have correct roles/passwords
+  try {
+    const devUser = db.prepare("SELECT id FROM users WHERE username='developer'").get() as any;
+    const devHash = hashPassword("dev123");
+    if (!devUser) {
+      db.prepare(`INSERT INTO users (username, password_hash, name, role, active) VALUES (?,?,?,?,1)`)
+        .run("developer", devHash, "مطور النظام", "developer");
+    } else {
+      db.prepare("UPDATE users SET role = 'developer', password_hash = ?, active = 1 WHERE username = 'developer'").run(devHash);
+    }
+
+    const adminUser = db.prepare("SELECT id FROM users WHERE username='admin'").get() as any;
+    const adminHash = hashPassword("admin123");
+    if (!adminUser) {
+      db.prepare(`INSERT INTO users (username, password_hash, name, role, active) VALUES (?,?,?,?,1)`)
+        .run("admin", adminHash, "مدير النظام", "admin");
+    } else {
+      db.prepare("UPDATE users SET role = 'admin', password_hash = ?, active = 1 WHERE username = 'admin'").run(adminHash);
+    }
+  } catch (e) {
+    console.error("Error ensuring admin/developer users:", e);
+  }
   // printer_settings default row
   try {
     db.exec(`INSERT OR IGNORE INTO printer_settings (id, paper_width, left_margin, right_margin, top_margin, bottom_margin, font_size, line_spacing, characters_per_line)
-             VALUES (1, 80, 4, 4, 2, 2, 10, 2, 48)`);
+             VALUES (1, 80, 1.5, 1.5, 1, 1, 11, 0, 48)`);
+    // Ensure existing row also gets updated to the new paper-saving defaults
+    db.exec(`UPDATE printer_settings SET paper_width = 80, left_margin = 1.5, right_margin = 1.5, top_margin = 1, bottom_margin = 1, font_size = 11, line_spacing = 0 WHERE id = 1`);
   } catch {}
 }
 
@@ -266,7 +621,10 @@ function seedData() {
 
   const adminHash = hashPassword("admin123");
   const cashierHash = hashPassword("cashier123");
+  const devHash = hashPassword("dev123");
 
+  db.prepare(`INSERT INTO users (username, password_hash, name, role, active) VALUES (?,?,?,?,1)`)
+    .run("developer", devHash, "مطور النظام", "developer");
   db.prepare(`INSERT INTO users (username, password_hash, name, role, active) VALUES (?,?,?,?,1)`)
     .run("admin", adminHash, "مدير النظام", "admin");
   db.prepare(`INSERT INTO users (username, password_hash, name, role, active) VALUES (?,?,?,?,1)`)

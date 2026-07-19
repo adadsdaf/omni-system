@@ -69,8 +69,8 @@ router.post("/orders", (req, res) => {
   const effectiveUserId = userId ?? authUser.id;
 
   const r = db.prepare(`
-    INSERT INTO orders (invoice_number, subtotal, discount, tax, total, payment_method, cash_amount, card_amount, customer_id, user_id, note, order_type, table_number)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    INSERT INTO orders (invoice_number, subtotal, discount, tax, total, payment_method, cash_amount, card_amount, customer_id, user_id, note, order_type, table_number, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     invoiceNumber,
     subtotal ?? 0,
@@ -85,6 +85,7 @@ router.post("/orders", (req, res) => {
     note ?? null,
     orderType ?? "dine-in",
     tableNumber ?? null,
+    new Date().toISOString()
   );
   const orderId = r.lastInsertRowid;
 

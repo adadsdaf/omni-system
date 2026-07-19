@@ -45,8 +45,11 @@ router.get("/printer-settings", (_req, res) => {
 
 router.put("/printer-settings", (req, res) => {
   const user = getAuthUser(req);
-  if (!user || user.role !== "admin") { res.status(403).json({ error: "غير مصرح" }); return; }
-  const b = req.body as Partial<ReturnType<typeof defaultSettings>>;
+  if (!user || (user.role !== "admin" && user.role !== "developer")) { res.status(403).json({ error: "غير مصرح" }); return; }
+  let b = req.body as any;
+  if (b && b.data && typeof b.data === "object") {
+    b = b.data;
+  }
   db.prepare(`
     INSERT INTO printer_settings (id, paper_width, left_margin, right_margin, top_margin, bottom_margin, font_size, line_spacing, characters_per_line, main_printer_name)
     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)

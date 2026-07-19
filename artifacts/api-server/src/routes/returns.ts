@@ -12,7 +12,7 @@ function requireAuth(req: any, res: any): any {
 
 function requireAdmin(req: any, res: any): boolean {
   const user = getAuthUser(req);
-  if (!user || user.role !== "admin") {
+  if (!user || (user.role !== "admin" && user.role !== "developer")) {
     res.status(403).json({ error: "غير مصرح" });
     return false;
   }
@@ -127,51 +127,104 @@ router.get("/orders/lookup", (req, res) => {
   const { q } = req.query as any;
   if (!q) { res.status(400).json({ error: "مطلوب معيار البحث" }); return; }
 
-  // البحث بالرقم التسلسلي أو بـ INV-XXXX
-  const searchNum = String(q).trim();
-  let orderRow = db.prepare(`
+  const qStr = String(q).trim();
+  // تنظيف المدخلات من السوابق والروابط مثل "INV-" والأصفار الزائدة لتطابق الرقم المسلسل المخزن بقاعدة البيانات
+  const cleanQ = qStr.replace(/^(inv-?|INV-?)/i, "").replace(/^0+/, "") || "0";
+  const likePattern = `%${cleanQ}%`;
+
+  // جلب كافة الفواتير المطابقة كقائمة
+  const orderRows = db.prepare(`
     SELECT o.*, u.name as user_name, c.name as customer_name
     FROM orders o
     LEFT JOIN users u ON u.id=o.user_id
     LEFT JOIN customers c ON c.id=o.customer_id
-    WHERE o.invoice_number=? OR o.invoice_number=? OR CAST(o.id AS TEXT)=?
-  `).get(searchNum, `INV-${searchNum.padStart(4,"0")}`, searchNum) as any;
+    WHERE o.invoice_number = ?
+       OR o.invoice_number = ?
+       OR CAST(o.id AS TEXT) = ?
+       OR COALESCE(NULLIF(LTRIM(REPLACE(REPLACE(LOWER(o.invoice_number), 'inv-', ''), 'inv', ''), '0'), ''), '0') = ?
+       OR (o.invoice_number LIKE ? AND ? <> '')
+    ORDER BY o.created_at DESC
+    LIMIT 50
+  `).all(
+    qStr,
+    cleanQ,
+    qStr,
+    cleanQ,
+    likePattern,
+    cleanQ
+  ) as any[];
 
-  if (!orderRow) { res.status(404).json({ error: "لم يتم العثور على الفاتورة" }); return; }
-  const items = db.prepare("SELECT * FROM order_items WHERE order_id=?").all(orderRow.id) as any[];
+  // معالجة كل فاتورة وحساب الكميات المرتجعة والمتبقية لكل صنف
+  const results = orderRows.map(orderRow => {
+    const items = db.prepare("SELECT * FROM order_items WHERE order_id=?").all(orderRow.id) as any[];
 
-  // هل تم إرجاع هذه الفاتورة مسبقاً؟
-  const existingReturn = db.prepare("SELECT id, return_number, total_refund FROM returns WHERE order_id=? OR invoice_number=?")
-    .get(orderRow.id, orderRow.invoice_number) as any;
+    // جلب المرتجعات السابقة الخاصة بهذه الفاتورة
+    const existingReturns = db.prepare(`
+      SELECT id, return_number, total_refund, created_at 
+      FROM returns 
+      WHERE order_id=? OR invoice_number=?
+    `).all(orderRow.id, orderRow.invoice_number) as any[];
 
-  res.json({
-    id: orderRow.id,
-    invoiceNumber: orderRow.invoice_number,
-    total: orderRow.total,
-    subtotal: orderRow.subtotal,
-    discount: orderRow.discount,
-    tax: orderRow.tax,
-    paymentMethod: orderRow.payment_method,
-    orderType: orderRow.order_type,
-    tableNumber: orderRow.table_number,
-    note: orderRow.note,
-    createdAt: orderRow.created_at,
-    cashierName: orderRow.user_name,
-    userId: orderRow.user_id,
-    customerName: orderRow.customer_name,
-    alreadyReturned: !!existingReturn,
-    existingReturn: existingReturn ?? null,
-    items: items.map(i => ({
-      id: i.id,
-      productId: i.product_id,
-      productName: i.product_name,
-      quantity: i.quantity,
-      unitPrice: i.unit_price,
-      total: i.total,
-      categoryId: i.category_id,
-      categoryName: i.category_name,
-    })),
+    // حساب كمية المرتجعات السابقة لكل صنف بالفاتورة
+    const returnedQtyRows = db.prepare(`
+      SELECT product_id, SUM(quantity) as returned_qty
+      FROM return_items ri
+      JOIN returns r ON r.id = ri.return_id
+      WHERE r.order_id = ? OR r.invoice_number = ?
+      GROUP BY product_id
+    `).all(orderRow.id, orderRow.invoice_number) as any[];
+
+    const returnedQtyMap: Record<number, number> = {};
+    for (const row of returnedQtyRows) {
+      if (row.product_id) {
+        returnedQtyMap[row.product_id] = Number(row.returned_qty || 0);
+      }
+    }
+
+    // بناء قائمة الأصناف مع احتساب الكميات المتبقية للارتجاع
+    const itemsWithQty = items.map(i => {
+      const returnedQuantity = returnedQtyMap[i.product_id] || 0;
+      const remainingQuantity = Math.max(0, i.quantity - returnedQuantity);
+      return {
+        id: i.id,
+        productId: i.product_id,
+        productName: i.product_name,
+        quantity: i.quantity,
+        returnedQuantity,
+        remainingQuantity,
+        unitPrice: i.unit_price,
+        total: i.total,
+        categoryId: i.category_id,
+        categoryName: i.category_name,
+      };
+    });
+
+    // هل تم إرجاع كامل أصناف الفاتورة؟
+    const fullyReturned = itemsWithQty.length > 0 && itemsWithQty.every(item => item.remainingQuantity <= 0);
+
+    return {
+      id: orderRow.id,
+      invoiceNumber: orderRow.invoice_number,
+      total: orderRow.total,
+      subtotal: orderRow.subtotal,
+      discount: orderRow.discount,
+      tax: orderRow.tax,
+      paymentMethod: orderRow.payment_method,
+      orderType: orderRow.order_type,
+      tableNumber: orderRow.table_number,
+      note: orderRow.note,
+      createdAt: orderRow.created_at,
+      cashierName: orderRow.user_name,
+      userId: orderRow.user_id,
+      customerName: orderRow.customer_name,
+      alreadyReturned: existingReturns.length > 0,
+      existingReturns, // مصفوفة المرتجعات السابقة التي يعرضها الفرونت إند
+      fullyReturned,
+      items: itemsWithQty,
+    };
   });
+
+  res.json(results);
 });
 
 /* ── ملخص صناديق الكاشيرين ── */
@@ -180,16 +233,21 @@ router.get("/cashier-boxes", (req, res) => {
   const { date } = req.query as any;
   const filterDate = date ?? new Date().toISOString().slice(0, 10);
 
-  const cashiers = db.prepare(`
-    SELECT u.id, u.name,
+  let cashiers = db.prepare(`
+    SELECT u.id, u.name, u.role,
       COALESCE(SUM(o.total),0) as orders_total,
       COUNT(o.id) as orders_count
     FROM users u
     LEFT JOIN orders o ON o.user_id=u.id AND DATE(o.created_at)=?
     WHERE u.active=1
-    GROUP BY u.id, u.name
+    GROUP BY u.id, u.name, u.role
     ORDER BY u.name
   `).all(filterDate) as any[];
+
+  const user = getAuthUser(req);
+  if (user && user.role !== "developer") {
+    cashiers = cashiers.filter(c => c.role !== "developer");
+  }
 
   const returns_ = db.prepare(`
     SELECT o.user_id,

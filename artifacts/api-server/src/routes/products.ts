@@ -5,7 +5,8 @@ import { getAuthUser } from "./auth";
 const router = Router();
 
 router.get("/products", (req, res) => {
-  const { categoryId, search } = req.query;
+  const { categoryId } = req.query;
+  const search = (req.query.search || req.query.q) as string | undefined;
   let sql = `
     SELECT p.id, p.number, p.name, p.price, p.cost, p.barcode,
            p.category_id as categoryId, c.name as categoryName, p.active, p.stock
@@ -18,6 +19,12 @@ router.get("/products", (req, res) => {
   sql += " ORDER BY p.number";
   const rows = (db.prepare(sql).all(...params) as any[]).map(r => ({ ...r, active: Boolean(r.active) }));
   res.json(rows);
+});
+
+router.get("/products/next-number", (req, res) => {
+  const row = db.prepare("SELECT MAX(number) as maxNum FROM products").get() as { maxNum: number | null };
+  const nextNumber = (row?.maxNum || 0) + 1;
+  res.json({ nextNumber });
 });
 
 router.get("/products/:id", (req, res) => {

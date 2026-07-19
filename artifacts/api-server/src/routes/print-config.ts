@@ -18,7 +18,7 @@ router.get("/print-config/receipt-copies", (_req, res) => {
 
 router.post("/print-config/receipt-copies", (req, res) => {
   const user = getAuthUser(req);
-  if (!user || user.role !== "admin") { res.status(403).json({ error: "غير مصرح" }); return; }
+  if (!user || (user.role !== "admin" && user.role !== "developer")) { res.status(403).json({ error: "غير مصرح" }); return; }
   const { copyNumber, label, enabled } = req.body;
   if (!copyNumber || !label) { res.status(400).json({ error: "بيانات ناقصة" }); return; }
   const r = db.prepare(
@@ -30,7 +30,7 @@ router.post("/print-config/receipt-copies", (req, res) => {
 
 router.put("/print-config/receipt-copies/:id", (req, res) => {
   const user = getAuthUser(req);
-  if (!user || user.role !== "admin") { res.status(403).json({ error: "غير مصرح" }); return; }
+  if (!user || (user.role !== "admin" && user.role !== "developer")) { res.status(403).json({ error: "غير مصرح" }); return; }
   const { copyNumber, label, enabled } = req.body;
   db.prepare(
     "UPDATE receipt_copy_configs SET copy_number=?, label=?, enabled=? WHERE id=?"
@@ -42,7 +42,7 @@ router.put("/print-config/receipt-copies/:id", (req, res) => {
 
 router.delete("/print-config/receipt-copies/:id", (req, res) => {
   const user = getAuthUser(req);
-  if (!user || user.role !== "admin") { res.status(403).json({ error: "غير مصرح" }); return; }
+  if (!user || (user.role !== "admin" && user.role !== "developer")) { res.status(403).json({ error: "غير مصرح" }); return; }
   db.prepare("DELETE FROM receipt_copy_configs WHERE id=?").run(req.params.id);
   res.status(204).send();
 });
@@ -73,7 +73,7 @@ router.get("/print-config/departments", (_req, res) => {
 
 router.post("/print-config/departments", (req, res) => {
   const user = getAuthUser(req);
-  if (!user || user.role !== "admin") { res.status(403).json({ error: "غير مصرح" }); return; }
+  if (!user || (user.role !== "admin" && user.role !== "developer")) { res.status(403).json({ error: "غير مصرح" }); return; }
   const { categoryId, printerName, copies, enabled, printOrder } = req.body;
   const r = db.prepare(
     "INSERT INTO department_print_configs (category_id, printer_name, copies, enabled, print_order) VALUES (?,?,?,?,?)"
@@ -87,7 +87,7 @@ router.post("/print-config/departments", (req, res) => {
 
 router.put("/print-config/departments/:id", (req, res) => {
   const user = getAuthUser(req);
-  if (!user || user.role !== "admin") { res.status(403).json({ error: "غير مصرح" }); return; }
+  if (!user || (user.role !== "admin" && user.role !== "developer")) { res.status(403).json({ error: "غير مصرح" }); return; }
   const { categoryId, printerName, copies, enabled, printOrder } = req.body;
   db.prepare(
     "UPDATE department_print_configs SET category_id=?, printer_name=?, copies=?, enabled=?, print_order=? WHERE id=?"
@@ -102,7 +102,7 @@ router.put("/print-config/departments/:id", (req, res) => {
 
 router.delete("/print-config/departments/:id", (req, res) => {
   const user = getAuthUser(req);
-  if (!user || user.role !== "admin") { res.status(403).json({ error: "غير مصرح" }); return; }
+  if (!user || (user.role !== "admin" && user.role !== "developer")) { res.status(403).json({ error: "غير مصرح" }); return; }
   db.prepare("DELETE FROM department_print_configs WHERE id=?").run(req.params.id);
   res.status(204).send();
 });

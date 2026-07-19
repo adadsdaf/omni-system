@@ -6,7 +6,7 @@ const router = Router();
 
 function requireAdmin(req: any, res: any): boolean {
   const user = getAuthUser(req);
-  if (!user || user.role !== "admin") {
+  if (!user || (user.role !== "admin" && user.role !== "developer")) {
     res.status(403).json({ error: "غير مصرح" });
     return false;
   }

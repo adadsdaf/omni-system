@@ -10,6 +10,7 @@ function getSettingsObj() {
   for (const r of rows) {
     if (r.value === "true") map[r.key] = true;
     else if (r.value === "false") map[r.key] = false;
+    else if (r.value === "null" || r.value === "") map[r.key] = null;
     else if (!isNaN(Number(r.value)) && r.value !== "") map[r.key] = Number(r.value);
     else map[r.key] = r.value;
   }
@@ -40,6 +41,7 @@ function getSettingsObj() {
     maxReprintCount: map["maxReprintCount"] ?? 3,
     masterCopiesCount: map["masterCopiesCount"] ?? 2,
     logoUrl: map["logoUrl"] ?? null,
+    systemLogoUrl: map["systemLogoUrl"] ?? null,
   };
 }
 
@@ -49,11 +51,18 @@ router.get("/settings", (_req, res) => {
 
 router.put("/settings", (req, res) => {
   const user = getAuthUser(req);
-  if (!user || user.role !== "admin") { res.status(403).json({ error: "غير مصرح" }); return; }
+  if (!user || (user.role !== "admin" && user.role !== "developer")) { res.status(403).json({ error: "غير مصرح" }); return; }
   const upsert = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)");
-  const updates = req.body as Record<string, any>;
+  let updates = req.body as Record<string, any>;
+  if (updates && updates.data && typeof updates.data === "object") {
+    updates = updates.data;
+  }
   for (const [k, v] of Object.entries(updates)) {
-    upsert.run(k, String(v));
+    if (k === "systemLogoUrl" && user.role !== "developer") {
+      res.status(403).json({ error: "غير مصرح بتعديل شعار النظام الأساسي لغير المطور" });
+      return;
+    }
+    upsert.run(k, v === null || v === undefined ? "null" : String(v));
   }
   res.json(getSettingsObj());
 });

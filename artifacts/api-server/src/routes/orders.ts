@@ -65,12 +65,12 @@ router.post("/orders", (req, res) => {
   if (!items?.length) { res.status(400).json({ error: "لا توجد منتجات" }); return; }
 
   const count = db.prepare("SELECT COUNT(*) as c FROM orders").get() as { c: number };
-  const invoiceNumber = `INV-${String(count.c + 1).padStart(4, "0")}`;
+  const invoiceNumber = String(count.c + 1);
   const effectiveUserId = userId ?? authUser.id;
 
   const r = db.prepare(`
-    INSERT INTO orders (invoice_number, subtotal, discount, tax, total, payment_method, cash_amount, card_amount, customer_id, user_id, note, order_type, table_number)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    INSERT INTO orders (invoice_number, subtotal, discount, tax, total, payment_method, cash_amount, card_amount, customer_id, user_id, note, order_type, table_number, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     invoiceNumber,
     subtotal ?? 0,
@@ -85,6 +85,7 @@ router.post("/orders", (req, res) => {
     note ?? null,
     orderType ?? "dine-in",
     tableNumber ?? null,
+    new Date().toISOString()
   );
   const orderId = r.lastInsertRowid;
 
@@ -120,7 +121,7 @@ router.get("/orders/:id", (req, res) => {
 
 router.delete("/orders/:id", (req, res) => {
   const user = getAuthUser(req);
-  if (!user || user.role !== "admin") { res.status(403).json({ error: "غير مصرح" }); return; }
+  if (!user || (user.role !== "admin" && user.role !== "developer")) { res.status(403).json({ error: "غير مصرح" }); return; }
   db.prepare("DELETE FROM orders WHERE id=?").run(req.params.id);
   res.status(204).send();
 });

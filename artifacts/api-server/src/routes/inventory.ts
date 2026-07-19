@@ -1,115 +1,109 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
-import { inventoryTable } from "@workspace/db";
-import { eq, lt, sum } from "drizzle-orm";
+import { db } from "../lib/sqlite";
+import { getAuthUser } from "./auth";
 
 const router = Router();
 
-function fmt(item: typeof inventoryTable.$inferSelect) {
-  const cur = Number(item.currentStock);
-  const min = Number(item.minStock);
-  return {
-    ...item,
-    currentStock: cur,
-    minStock: min,
-    maxStock: item.maxStock ? Number(item.maxStock) : null,
-    costPerUnit: Number(item.costPerUnit),
-    totalValue: cur * Number(item.costPerUnit),
-    isLowStock: cur <= min,
-  };
-}
+// Get inventory summary, valuation, and low stock items
+router.get("/inventory/summary", (_req, res) => {
+  const products = db.prepare(`
+    SELECT p.id, p.number, p.name, p.price, p.cost, p.stock, c.name as categoryName
+    FROM products p LEFT JOIN categories c ON c.id = p.category_id
+    ORDER BY p.number
+  `).all() as any[];
 
-router.get("/inventory/summary", async (req, res) => {
-  try {
-    const rows = await db.select().from(inventoryTable);
-    const totalItems = rows.length;
-    const lowStockItems = rows.filter((i) => Number(i.currentStock) <= Number(i.minStock)).length;
-    const outOfStockItems = rows.filter((i) => Number(i.currentStock) === 0).length;
-    const totalValue = rows.reduce((acc, i) => acc + Number(i.currentStock) * Number(i.costPerUnit), 0);
-    res.json({ totalItems, lowStockItems, outOfStockItems, totalValue: Number(totalValue.toFixed(2)) });
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
+  const totalItems = products.length;
+  let totalStockCount = 0;
+  let totalStockCost = 0;
+  let totalStockValue = 0;
+  const lowStockItems: any[] = [];
 
-router.get("/inventory", async (req, res) => {
-  try {
-    const { search, lowStock } = req.query;
-    let rows = await db.select().from(inventoryTable).orderBy(inventoryTable.name);
-    if (lowStock === "true") rows = rows.filter((i) => Number(i.currentStock) <= Number(i.minStock));
-    if (search) {
-      const s = String(search).toLowerCase();
-      rows = rows.filter((i) => i.name.toLowerCase().includes(s) || i.nameAr.toLowerCase().includes(s));
+  for (const p of products) {
+    const stock = p.stock ?? 0;
+    const cost = p.cost ?? 0;
+    const price = p.price ?? 0;
+    totalStockCount += stock;
+    totalStockCost += stock * cost;
+    totalStockValue += stock * price;
+
+    if (stock <= 10) {
+      lowStockItems.push(p);
     }
-    res.json(rows.map(fmt));
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
   }
+
+  res.json({
+    totalItems,
+    totalStockCount,
+    totalStockCost,
+    totalStockValue,
+    lowStockCount: lowStockItems.length,
+    lowStockItems,
+    products,
+  });
 });
 
-router.post("/inventory", async (req, res) => {
-  try {
-    const { name, nameAr, unit, currentStock, minStock, maxStock, costPerUnit, supplier } = req.body;
-    const [item] = await db.insert(inventoryTable).values({
-      name, nameAr, unit,
-      currentStock: String(currentStock),
-      minStock: String(minStock),
-      maxStock: maxStock ? String(maxStock) : null,
-      costPerUnit: String(costPerUnit),
-      supplier,
-    }).returning();
-    res.status(201).json(fmt(item));
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
+// Get stock movements history
+router.get("/inventory/movements", (req, res) => {
+  const { productId } = req.query;
+  let sql = `
+    SELECT m.*, p.name as productName, p.number as productNumber
+    FROM stock_movements m
+    JOIN products p ON p.id = m.product_id
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+  if (productId) {
+    sql += " AND m.product_id = ?";
+    params.push(productId);
   }
+  sql += " ORDER BY m.id DESC LIMIT 100";
+  const movements = db.prepare(sql).all(...params);
+  res.json(movements);
 });
 
-router.get("/inventory/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const [item] = await db.select().from(inventoryTable).where(eq(inventoryTable.id, id));
-    if (!item) return res.status(404).json({ error: "Not found" });
-    res.json(fmt(item));
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
+// Adjust stock or record movement (In / Out / Adjustment)
+router.post("/inventory/movement", (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) {
+    res.status(401).json({ error: "غير مصرح" });
+    return;
   }
-});
 
-router.patch("/inventory/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const { name, nameAr, unit, currentStock, minStock, maxStock, costPerUnit, supplier } = req.body;
-    const updates: Record<string, unknown> = {};
-    if (name !== undefined) updates.name = name;
-    if (nameAr !== undefined) updates.nameAr = nameAr;
-    if (unit !== undefined) updates.unit = unit;
-    if (currentStock !== undefined) updates.currentStock = String(currentStock);
-    if (minStock !== undefined) updates.minStock = String(minStock);
-    if (maxStock !== undefined) updates.maxStock = maxStock ? String(maxStock) : null;
-    if (costPerUnit !== undefined) updates.costPerUnit = String(costPerUnit);
-    if (supplier !== undefined) updates.supplier = supplier;
-    const [item] = await db.update(inventoryTable).set(updates).where(eq(inventoryTable.id, id)).returning();
-    if (!item) return res.status(404).json({ error: "Not found" });
-    res.json(fmt(item));
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
+  const { productId, type, quantity, reason, referenceId } = req.body;
+  if (!productId || !type || quantity === undefined) {
+    res.status(400).json({ error: "بيانات ناقصة" });
+    return;
   }
-});
 
-router.delete("/inventory/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    await db.delete(inventoryTable).where(eq(inventoryTable.id, id));
-    res.status(204).send();
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Internal server error" });
+  const product = db.prepare("SELECT * FROM products WHERE id=?").get(productId) as any;
+  if (!product) {
+    res.status(404).json({ error: "المنتج غير موجود" });
+    return;
   }
+
+  const prevStock = product.stock ?? 0;
+  let newStock = prevStock;
+  const qty = Number(quantity);
+
+  if (type === "in") {
+    newStock = prevStock + qty;
+  } else if (type === "out") {
+    newStock = Math.max(0, prevStock - qty);
+  } else if (type === "adjustment") {
+    newStock = qty; // direct count adjustment
+  }
+
+  const diff = newStock - prevStock;
+
+  db.transaction(() => {
+    db.prepare("UPDATE products SET stock = ? WHERE id = ?").run(newStock, productId);
+    db.prepare(`
+      INSERT INTO stock_movements (product_id, type, quantity, previous_stock, new_stock, reason, reference_id, user_id, user_name)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(productId, type, Math.abs(diff), prevStock, newStock, reason || "تسوية مخزنية يدويّة", referenceId || null, user.id, user.name);
+  })();
+
+  res.json({ success: true, previousStock: prevStock, newStock });
 });
 
 export default router;
