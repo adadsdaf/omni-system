@@ -51,19 +51,38 @@ export function useAuth() {
   return context;
 }
 
-export function ProtectedRoute({ children, requireAdmin = false }: { children: React.ReactNode; requireAdmin?: boolean }) {
+export function ProtectedRoute({ 
+  children, 
+  requireAdmin = false, 
+  requireDeveloper = false,
+  allowedRoles
+}: { 
+  children: React.ReactNode; 
+  requireAdmin?: boolean; 
+  requireDeveloper?: boolean;
+  allowedRoles?: ("admin" | "cashier" | "developer" | "accountant")[];
+}) {
   const { user, isLoading } = useAuth();
   const [, setLocation] = useLocation();
 
-  useEffect(() => {
-    if (!isLoading && !user) {
-      setLocation("/login");
-    } else if (!isLoading && user && requireAdmin && user.role !== "admin") {
-      setLocation("/pos");
-    }
-  }, [user, isLoading, requireAdmin, setLocation]);
+  const isAuthorized = !isLoading && user && (
+    (requireDeveloper && user.role === "developer") ||
+    (!requireDeveloper && !requireAdmin && !allowedRoles) ||
+    (requireAdmin && (user.role === "admin" || user.role === "developer")) ||
+    (allowedRoles && allowedRoles.includes(user.role))
+  );
 
-  if (isLoading || !user || (requireAdmin && user.role !== "admin")) {
+  useEffect(() => {
+    if (!isLoading) {
+      if (!user) {
+        setLocation("/login");
+      } else if (!isAuthorized) {
+        setLocation("/pos");
+      }
+    }
+  }, [user, isLoading, isAuthorized, setLocation]);
+
+  if (isLoading || !user || !isAuthorized) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />

@@ -4,6 +4,7 @@ import { LogOut, Clock, LayoutDashboard } from "lucide-react";
 import { Link } from "wouter";
 import { useEffect, useState } from "react";
 import { Button } from "./ui/button";
+import { AppIcon } from "@/components/AppLogo";
 
 export function PosLayout({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -29,7 +30,7 @@ export function PosLayout({ children }: { children: React.ReactNode }) {
       {/* Topbar */}
       <header className="h-14 bg-[#0f1e3c] text-white flex items-center justify-between px-4 shrink-0 shadow-md">
         <div className="flex items-center gap-3">
-          <img src="/omnisystem-logo.png" alt="OmniSystem" className="h-10 w-10 rounded-full object-cover" />
+          <AppIcon alt="OmniSystem" className="h-10 w-10 rounded-full object-cover shrink-0" />
           <div className="leading-tight">
             <div className="text-sm font-extrabold text-white tracking-wide">OmniSystem</div>
             <div className="text-[10px] text-blue-300 font-medium">by UniSoft</div>
