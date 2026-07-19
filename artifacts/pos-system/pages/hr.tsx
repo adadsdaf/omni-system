@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { AdminLayout } from "@/components/admin-layout";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Pencil, Trash2, Users, DollarSign, Building2, CalendarCheck, Search, Printer } from "lucide-react";
+import { Plus, Pencil, Trash2, Users, DollarSign, Building2, CalendarCheck, UtensilsCrossed } from "lucide-react";
+import { PayrollPrintButton } from "@/components/payroll-print";
 
 function fetchAuth(url: string, opts: RequestInit = {}) {
   const token = localStorage.getItem("pos_token") ?? "";
@@ -37,175 +38,6 @@ async function apiDel(url: string) {
 }
 
 function fmt(n?: number) { return Number(n ?? 0).toLocaleString("ar-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-
-/* ─── Payslip Print Component ─── */
-function PayslipPrintDialog({ salary, open, onClose }: { salary: any; open: boolean; onClose: () => void }) {
-  const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: () => apiGet("/api/settings") });
-  const s = (settings as any) ?? {};
-  const printRef = useRef<HTMLDivElement>(null);
-
-  const handlePrint = () => {
-    const content = printRef.current;
-    if (!content) return;
-    const win = window.open("", "_blank", "width=800,height=600");
-    if (!win) return;
-    win.document.write(`
-      <!DOCTYPE html>
-      <html dir="rtl" lang="ar">
-      <head>
-        <meta charset="UTF-8" />
-        <title>كشف راتب - ${salary?.employee_name}</title>
-        <style>
-          @page { size: A4; margin: 20mm; }
-          body { font-family: 'Arial', 'Tajawal', sans-serif; direction: rtl; text-align: right; color: #000; margin: 0; padding: 0; }
-          .payslip { width: 100%; max-width: 700px; margin: 0 auto; }
-          .header { display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 3px solid #1e3a5f; padding-bottom: 12px; margin-bottom: 16px; }
-          .header-info-right { font-size: 12px; line-height: 1.8; }
-          .header-logo { text-align: center; flex: 1; }
-          .header-logo img { max-width: 90px; max-height: 70px; object-fit: contain; }
-          .header-logo .biz-name { font-size: 18px; font-weight: 900; color: #1e3a5f; margin-top: 4px; }
-          .header-info-left { font-size: 12px; line-height: 1.8; text-align: left; direction: ltr; }
-          .title { text-align: center; font-size: 20px; font-weight: 900; color: #1e3a5f; margin: 12px 0 8px; letter-spacing: 1px; }
-          .sub-title { text-align: center; font-size: 13px; color: #555; margin-bottom: 16px; }
-          .section { margin-bottom: 16px; }
-          .section-title { font-size: 13px; font-weight: bold; background: #1e3a5f; color: white; padding: 5px 10px; border-radius: 4px; margin-bottom: 8px; }
-          table { width: 100%; border-collapse: collapse; font-size: 13px; }
-          th, td { border: 1px solid #ddd; padding: 7px 10px; }
-          th { background: #f0f4f8; font-weight: bold; }
-          .total-row { background: #e8f0fe; font-size: 15px; font-weight: 900; }
-          .sig-area { display: flex; justify-content: space-between; margin-top: 30px; gap: 40px; }
-          .sig-box { flex: 1; text-align: center; border-top: 1px solid #333; padding-top: 6px; font-size: 12px; color: #555; }
-          .footer { text-align: center; font-size: 10px; color: #888; margin-top: 20px; border-top: 1px solid #eee; padding-top: 8px; }
-        </style>
-      </head>
-      <body>
-        ${content.innerHTML}
-      </body>
-      </html>
-    `);
-    win.document.close();
-    win.focus();
-    setTimeout(() => { win.print(); win.close(); }, 300);
-  };
-
-  if (!salary) return null;
-  const net = (salary.basic_salary ?? 0) + (salary.bonuses ?? 0) - (salary.deductions ?? 0);
-  const monthLabel = salary.month ? new Date(salary.month + "-01").toLocaleDateString("ar-SA", { year: "numeric", month: "long" }) : salary.month;
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl" dir="rtl">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><Printer className="w-5 h-5" />كشف راتب — {salary.employee_name}</DialogTitle></DialogHeader>
-        <div className="max-h-[65vh] overflow-y-auto border border-border rounded-xl p-4 bg-white text-black">
-          <div ref={printRef}>
-            <div className="payslip">
-              {/* Header */}
-              <div className="header">
-                <div className="header-info-right">
-                  {s.address && <div>{s.address}</div>}
-                  {s.taxNumber && <div>الرقم الضريبي: {s.taxNumber}</div>}
-                </div>
-                <div className="header-logo">
-                  {s.printLogo && s.logoUrl && (
-                    <img src={s.logoUrl} alt="شعار" />
-                  )}
-                  <div className="biz-name">{s.businessName ?? "المطعم"}</div>
-                </div>
-                <div className="header-info-left">
-                  {s.phone && <div>{s.phone}</div>}
-                  <div style={{ direction: "rtl", textAlign: "right" }}>التاريخ: {new Date().toLocaleDateString("ar-SA")}</div>
-                </div>
-              </div>
-
-              <div className="title">كشف الراتب الشهري</div>
-              <div className="sub-title">شهر: {monthLabel}</div>
-
-              {/* Employee Info */}
-              <div className="section">
-                <div className="section-title">بيانات الموظف</div>
-                <table>
-                  <tbody>
-                    <tr>
-                      <th>رقم الموظف</th>
-                      <td>{salary.employee_number}</td>
-                      <th>اسم الموظف</th>
-                      <td>{salary.employee_name}</td>
-                    </tr>
-                    <tr>
-                      <th>الشهر</th>
-                      <td>{monthLabel}</td>
-                      <th>الحالة</th>
-                      <td>{salary.status === "paid" ? "مصروف" : "معلق"}</td>
-                    </tr>
-                    {salary.payment_date && (
-                      <tr>
-                        <th>تاريخ الصرف</th>
-                        <td colSpan={3}>{salary.payment_date}</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Salary Details */}
-              <div className="section">
-                <div className="section-title">تفاصيل الراتب</div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>البند</th>
-                      <th style={{ textAlign: "left", direction: "ltr" }}>المبلغ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>الراتب الأساسي</td>
-                      <td style={{ textAlign: "left", direction: "ltr" }}>{fmt(salary.basic_salary)}</td>
-                    </tr>
-                    <tr>
-                      <td>البدلات والحوافز</td>
-                      <td style={{ textAlign: "left", direction: "ltr", color: "#16a34a" }}>+ {fmt(salary.bonuses)}</td>
-                    </tr>
-                    <tr>
-                      <td>الخصومات</td>
-                      <td style={{ textAlign: "left", direction: "ltr", color: "#dc2626" }}>- {fmt(salary.deductions)}</td>
-                    </tr>
-                    <tr className="total-row">
-                      <td><strong>صافي الراتب</strong></td>
-                      <td style={{ textAlign: "left", direction: "ltr" }}><strong>{fmt(net)}</strong></td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              {salary.notes && (
-                <div className="section">
-                  <div className="section-title">ملاحظات</div>
-                  <div style={{ padding: "8px", border: "1px solid #ddd", borderRadius: "4px", fontSize: "13px" }}>{salary.notes}</div>
-                </div>
-              )}
-
-              {/* Signatures */}
-              <div className="sig-area">
-                <div className="sig-box">توقيع المدير</div>
-                <div className="sig-box">توقيع المحاسب</div>
-                <div className="sig-box">توقيع الموظف</div>
-              </div>
-
-              <div className="footer">
-                {s.businessName ?? "المطعم"} — كشف راتب شهري — {new Date().toLocaleDateString("ar-SA")}
-              </div>
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>إغلاق</Button>
-          <Button onClick={handlePrint} className="gap-2"><Printer className="w-4 h-4" />طباعة</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 /* ─── Departments Tab ─── */
 function DepartmentsTab() {
@@ -294,7 +126,6 @@ function EmployeesTab() {
   const { data: depts = [] } = useQuery({ queryKey: ["hr-depts"], queryFn: () => apiGet("/api/hr/departments") });
   const [showDlg, setShowDlg] = useState(false);
   const [editing, setEditing] = useState<any>(null);
-  const [searchTerm, setSearchTerm] = useState("");
   const emptyForm = { employee_number: "", name: "", phone: "", position: "", department_id: "", basic_salary: "", hire_date: "", active: true };
   const [form, setForm] = useState(emptyForm);
 
@@ -302,7 +133,7 @@ function EmployeesTab() {
 
   const saveMut = useMutation({
     mutationFn: (f: typeof form) => {
-      const data = { ...f, department_id: f.department_id ? Number(f.department_id) : null, basic_salary: Number(f.basic_salary) };
+      const data = { ...f, department_id: (f.department_id && f.department_id !== "none") ? Number(f.department_id) : null, basic_salary: Number(f.basic_salary) };
       return editing ? apiPut(`/api/hr/employees/${editing.id}`, data) : apiPost("/api/hr/employees", data);
     },
     onSuccess: () => { invalidate(); setShowDlg(false); toast({ title: editing ? "تم التعديل" : "تمت الإضافة" }); },
@@ -315,34 +146,25 @@ function EmployeesTab() {
     onError: () => toast({ variant: "destructive", title: "فشل في الحذف" }),
   });
 
-  const openAdd = () => { setEditing(null); setForm(emptyForm); setShowDlg(true); };
+  const openAdd = () => { 
+    setEditing(null); 
+    const maxNum = (employees as any[]).length > 0
+      ? Math.max(...(employees as any[]).map((e: any) => {
+          const m = e.employee_number?.match(/\d+/);
+          return m ? parseInt(m[0], 10) : 0;
+        }), 0)
+      : 0;
+    const nextEmpNo = `EMP-${String(maxNum + 1).padStart(4, '0')}`;
+    setForm({ ...emptyForm, employee_number: nextEmpNo }); 
+    setShowDlg(true); 
+  };
   const openEdit = (e: any) => { setEditing(e); setForm({ employee_number: e.employee_number, name: e.name, phone: e.phone ?? "", position: e.position ?? "", department_id: e.department_id ? String(e.department_id) : "", basic_salary: String(e.basic_salary), hire_date: e.hire_date ?? "", active: Boolean(e.active) }); setShowDlg(true); };
-
-  const term = searchTerm.trim().toLowerCase();
-  const filtered = (employees as any[]).filter((e: any) =>
-    !term ||
-    e.name?.toLowerCase().includes(term) ||
-    e.employee_number?.toLowerCase().includes(term) ||
-    e.position?.toLowerCase().includes(term) ||
-    e.department_name?.toLowerCase().includes(term)
-  );
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center gap-3">
+      <div className="flex justify-between items-center">
         <h2 className="text-lg font-semibold">الموظفون</h2>
-        <div className="flex gap-2 items-center">
-          <div className="relative">
-            <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              placeholder="بحث بالاسم أو الرقم أو المنصب..."
-              className="pr-8 w-56"
-            />
-          </div>
-          <Button onClick={openAdd} size="sm" className="gap-2"><Plus className="w-4 h-4" />إضافة موظف</Button>
-        </div>
+        <Button onClick={openAdd} size="sm" className="gap-2"><Plus className="w-4 h-4" />إضافة موظف</Button>
       </div>
       {isLoading ? <div className="text-center py-8 text-muted-foreground">جاري التحميل...</div> : (
         <div className="bg-card rounded-xl border border-border overflow-x-auto">
@@ -359,7 +181,7 @@ function EmployeesTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map((e: any) => (
+              {(employees as any[]).map((e: any) => (
                 <tr key={e.id} className="hover:bg-muted/30">
                   <td className="p-3 font-mono text-xs">{e.employee_number}</td>
                   <td className="p-3 font-medium">{e.name}</td>
@@ -375,7 +197,7 @@ function EmployeesTab() {
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">{term ? "لا نتائج للبحث" : "لا يوجد موظفون"}</td></tr>}
+              {(employees as any[]).length === 0 && <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">لا يوجد موظفون</td></tr>}
             </tbody>
           </table>
         </div>
@@ -384,15 +206,18 @@ function EmployeesTab() {
         <DialogContent className="max-w-lg" dir="rtl">
           <DialogHeader><DialogTitle>{editing ? "تعديل موظف" : "إضافة موظف"}</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-sm font-medium">رقم الموظف *</label><Input value={form.employee_number} onChange={e => setForm(f => ({ ...f, employee_number: e.target.value }))} placeholder="EMP-001" className="mt-1" /></div>
+            <div><label className="text-sm font-medium">رقم الموظف (تلقائي)</label><Input value={form.employee_number} onChange={e => setForm(f => ({ ...f, employee_number: e.target.value }))} placeholder="EMP-001" className="mt-1" /></div>
             <div><label className="text-sm font-medium">الاسم *</label><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="اسم الموظف" className="mt-1" /></div>
-            <div><label className="text-sm font-medium">رقم الهاتف</label><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="05xxxxxxxx" className="mt-1" /></div>
+            <div><label className="text-sm font-medium">رقم الهاتف (اختياري)</label><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="05xxxxxxxx" className="mt-1" /></div>
             <div><label className="text-sm font-medium">المنصب الوظيفي</label><Input value={form.position} onChange={e => setForm(f => ({ ...f, position: e.target.value }))} placeholder="مثال: محاسب" className="mt-1" /></div>
             <div>
-              <label className="text-sm font-medium">القسم</label>
-              <Select value={form.department_id} onValueChange={v => setForm(f => ({ ...f, department_id: v }))}>
+              <label className="text-sm font-medium">القسم (اختياري)</label>
+              <Select value={form.department_id || "none"} onValueChange={v => setForm(f => ({ ...f, department_id: v === "none" ? "" : v }))}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="اختر القسم" /></SelectTrigger>
-                <SelectContent>{(depts as any[]).map((d: any) => <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>)}</SelectContent>
+                <SelectContent>
+                  <SelectItem value="none">بدون قسم (اختياري)</SelectItem>
+                  {(depts as any[]).map((d: any) => <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>)}
+                </SelectContent>
               </Select>
             </div>
             <div><label className="text-sm font-medium">الراتب الأساسي</label><Input type="number" value={form.basic_salary} onChange={e => setForm(f => ({ ...f, basic_salary: e.target.value }))} placeholder="0" className="mt-1" /></div>
@@ -404,7 +229,7 @@ function EmployeesTab() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDlg(false)}>إلغاء</Button>
-            <Button onClick={() => saveMut.mutate(form)} disabled={!form.employee_number || !form.name || saveMut.isPending}>حفظ</Button>
+            <Button onClick={() => saveMut.mutate(form)} disabled={!form.name || saveMut.isPending}>حفظ</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -422,7 +247,6 @@ function SalariesTab() {
   const { data: employees = [] } = useQuery({ queryKey: ["hr-employees"], queryFn: () => apiGet("/api/hr/employees") });
   const [showDlg, setShowDlg] = useState(false);
   const [editing, setEditing] = useState<any>(null);
-  const [printSalary, setPrintSalary] = useState<any>(null);
   const emptyForm = { employee_id: "", month: currentMonth, basic_salary: "", bonuses: "0", deductions: "0", notes: "" };
   const [form, setForm] = useState(emptyForm);
 
@@ -478,7 +302,7 @@ function SalariesTab() {
                 <th className="text-right p-3 font-semibold">الخصومات</th>
                 <th className="text-right p-3 font-semibold">الصافي</th>
                 <th className="text-right p-3 font-semibold">الحالة</th>
-                <th className="p-3 w-36"></th>
+                <th className="p-3 w-28"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -494,7 +318,7 @@ function SalariesTab() {
                   <td className="p-3">
                     <div className="flex gap-1 justify-end flex-wrap">
                       {s.status !== "paid" && <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => payMut.mutate(s)}>صرف</Button>}
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-blue-600" title="طباعة كشف الراتب" onClick={() => setPrintSalary(s)}><Printer className="w-3 h-3" /></Button>
+                      <PayrollPrintButton employeeId={s.employee_id} month={s.month} employeeName={s.employee_name} />
                       <Button variant="ghost" size="icon" onClick={() => openEdit(s)}><Pencil className="w-3 h-3" /></Button>
                       <Button variant="ghost" size="icon" className="text-destructive" onClick={() => confirm("حذف السجل؟") && delMut.mutate(s.id)}><Trash2 className="w-3 h-3" /></Button>
                     </div>
@@ -535,8 +359,6 @@ function SalariesTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <PayslipPrintDialog salary={printSalary} open={!!printSalary} onClose={() => setPrintSalary(null)} />
     </div>
   );
 }
@@ -583,7 +405,7 @@ function AttendanceTab() {
         <h2 className="text-lg font-semibold">سجل الحضور والانصراف</h2>
         <div className="flex gap-2">
           <Input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} className="w-40" />
-          <Button onClick={openAdd} size="sm" className="gap-2"><Plus className="w-4 h-4" />تسجيل حضور</Button>
+          <Button onClick={openAdd} size="sm" className="gap-2"><Plus className="w-4 h-4" />تسجيل</Button>
         </div>
       </div>
       {isLoading ? <div className="text-center py-8 text-muted-foreground">جاري التحميل...</div> : (
@@ -593,9 +415,10 @@ function AttendanceTab() {
               <tr>
                 <th className="text-right p-3 font-semibold">الموظف</th>
                 <th className="text-right p-3 font-semibold">التاريخ</th>
-                <th className="text-right p-3 font-semibold">الحضور</th>
-                <th className="text-right p-3 font-semibold">الانصراف</th>
+                <th className="text-right p-3 font-semibold">وقت الحضور</th>
+                <th className="text-right p-3 font-semibold">وقت الانصراف</th>
                 <th className="text-right p-3 font-semibold">الحالة</th>
+                <th className="text-right p-3 font-semibold">ملاحظات</th>
                 <th className="p-3 w-20"></th>
               </tr>
             </thead>
@@ -604,9 +427,10 @@ function AttendanceTab() {
                 <tr key={a.id} className="hover:bg-muted/30">
                   <td className="p-3 font-medium">{a.employee_name}</td>
                   <td className="p-3 text-muted-foreground">{a.date}</td>
-                  <td className="p-3 font-mono text-sm">{a.check_in ?? "—"}</td>
-                  <td className="p-3 font-mono text-sm">{a.check_out ?? "—"}</td>
+                  <td className="p-3 font-mono">{a.check_in ?? "—"}</td>
+                  <td className="p-3 font-mono">{a.check_out ?? "—"}</td>
                   <td className="p-3"><Badge variant={statusVariant[a.status]}>{statusLabel[a.status] ?? a.status}</Badge></td>
+                  <td className="p-3 text-muted-foreground text-xs">{a.notes ?? "—"}</td>
                   <td className="p-3">
                     <div className="flex gap-2 justify-end">
                       <Button variant="ghost" size="icon" onClick={() => openEdit(a)}><Pencil className="w-4 h-4" /></Button>
@@ -615,7 +439,7 @@ function AttendanceTab() {
                   </td>
                 </tr>
               ))}
-              {(attendance as any[]).length === 0 && <tr><td colSpan={6} className="p-6 text-center text-muted-foreground">لا توجد سجلات لهذا اليوم</td></tr>}
+              {(attendance as any[]).length === 0 && <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">لا توجد سجلات لهذا اليوم</td></tr>}
             </tbody>
           </table>
         </div>
@@ -660,49 +484,142 @@ function AttendanceTab() {
   );
 }
 
+/* ─── تبويب خصم وجبات الموظفين ─── */
+function MealDeductionsTab() {
+  const { toast } = useToast();
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const [filterMonth, setFilterMonth] = useState(currentMonth);
+  const [filterEmp, setFilterEmp] = useState("");
+  const { data: employees = [] } = useQuery({ queryKey: ["hr-employees"], queryFn: () => apiGet("/api/hr/employees") });
+  const { data: deductions = [], isLoading } = useQuery({
+    queryKey: ["hr-meal-deductions", filterMonth, filterEmp],
+    queryFn: () => {
+      const params = new URLSearchParams({ month: filterMonth });
+      if (filterEmp) params.set("employee_id", filterEmp);
+      return apiGet(`/api/hr/meal-deductions?${params}`);
+    },
+  });
+
+  const totalDeductions = (deductions as any[]).reduce((s, d) => s + d.amount, 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div>
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <UtensilsCrossed className="w-5 h-5 text-amber-600" />خصم وجبات الموظفين
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            إجمالي الخصومات: <span className="font-bold text-destructive">{Number(totalDeductions).toLocaleString("ar-SA", { minimumFractionDigits: 2 })}</span>
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Select value={filterEmp} onValueChange={setFilterEmp}>
+            <SelectTrigger className="w-44"><SelectValue placeholder="كل الموظفين" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">كل الموظفين</SelectItem>
+              {(employees as any[]).filter((e: any) => e.active).map((e: any) => (
+                <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="w-40" />
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="text-center py-8 text-muted-foreground">جاري التحميل...</div>
+      ) : (
+        <div className="bg-card rounded-xl border border-border overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 border-b border-border">
+              <tr>
+                <th className="text-right p-3 font-semibold">الموظف</th>
+                <th className="text-right p-3 font-semibold">رقم الموظف</th>
+                <th className="text-right p-3 font-semibold">الكاشير</th>
+                <th className="text-right p-3 font-semibold">التاريخ</th>
+                <th className="text-right p-3 font-semibold">رقم الفاتورة</th>
+                <th className="text-right p-3 font-semibold">ملاحظات</th>
+                <th className="text-right p-3 font-semibold">المبلغ</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {(deductions as any[]).map((d: any) => (
+                <tr key={d.id} className="hover:bg-muted/30">
+                  <td className="p-3 font-medium">{d.employee_name}</td>
+                  <td className="p-3 font-mono text-xs text-muted-foreground">{d.employee_number}</td>
+                  <td className="p-3 text-muted-foreground">{d.cashier_name}</td>
+                  <td className="p-3 text-muted-foreground">{new Date(d.created_at).toLocaleDateString("ar-SA")}</td>
+                  <td className="p-3 font-mono text-xs">{d.invoice_number ?? "—"}</td>
+                  <td className="p-3 text-xs text-muted-foreground">{d.notes ?? "—"}</td>
+                  <td className="p-3 font-mono font-bold text-destructive">{Number(d.amount).toLocaleString("ar-SA", { minimumFractionDigits: 2 })}</td>
+                </tr>
+              ))}
+              {(deductions as any[]).length === 0 && (
+                <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">لا توجد خصومات وجبات لهذا الشهر</td></tr>
+              )}
+            </tbody>
+            {(deductions as any[]).length > 0 && (
+              <tfoot className="border-t border-border bg-muted/30">
+                <tr>
+                  <td colSpan={6} className="p-3 font-bold text-right">الإجمالي</td>
+                  <td className="p-3 font-bold text-destructive font-mono">
+                    {Number(totalDeductions).toLocaleString("ar-SA", { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Main HR Page ─── */
 export default function HR() {
   const { data: summary } = useQuery({ queryKey: ["hr-summary"], queryFn: () => apiGet("/api/hr/summary") });
-  const s = (summary as any) ?? {};
 
   return (
     <AdminLayout>
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold">نظام الموارد البشرية</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">نظام الموارد البشرية</h1>
+          <p className="text-sm text-muted-foreground">{new Date().toLocaleDateString("ar-SA", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</p>
+        </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2"><Users className="w-4 h-4" />الموظفون النشطون</CardTitle></CardHeader>
-            <CardContent><div className="text-2xl font-bold">{s.totalEmployees ?? 0}</div></CardContent>
+            <CardContent><div className="text-2xl font-bold">{(summary as any)?.totalEmployees ?? 0}</div></CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2"><Building2 className="w-4 h-4" />الأقسام</CardTitle></CardHeader>
-            <CardContent><div className="text-2xl font-bold">{s.totalDepts ?? 0}</div></CardContent>
+            <CardContent><div className="text-2xl font-bold">{(summary as any)?.totalDepts ?? 0}</div></CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2"><DollarSign className="w-4 h-4" />رواتب الشهر</CardTitle></CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{s.currentMonthSalaryCount ?? 0}</div>
-              <div className="text-sm text-primary font-mono">{fmt(s.currentMonthSalaries)}</div>
-            </CardContent>
+            <CardContent><div className="text-2xl font-bold text-primary">{(summary as any)?.currentMonthSalaries?.toLocaleString("ar-SA", { maximumFractionDigits: 0 }) ?? 0}</div></CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2"><CalendarCheck className="w-4 h-4" />حاضرون اليوم</CardTitle></CardHeader>
-            <CardContent><div className="text-2xl font-bold">{s.todayPresent ?? 0}</div></CardContent>
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2"><CalendarCheck className="w-4 h-4" />الحضور اليوم</CardTitle></CardHeader>
+            <CardContent><div className="text-2xl font-bold text-green-600">{(summary as any)?.todayPresent ?? 0}</div></CardContent>
           </Card>
         </div>
 
         <Tabs defaultValue="employees" dir="rtl">
-          <TabsList>
+          <TabsList className="grid grid-cols-5 w-full max-w-2xl">
             <TabsTrigger value="employees">الموظفون</TabsTrigger>
+            <TabsTrigger value="departments">الأقسام</TabsTrigger>
             <TabsTrigger value="salaries">الرواتب</TabsTrigger>
             <TabsTrigger value="attendance">الحضور</TabsTrigger>
-            <TabsTrigger value="departments">الأقسام</TabsTrigger>
+            <TabsTrigger value="meals">وجبات الموظفين</TabsTrigger>
           </TabsList>
           <TabsContent value="employees" className="mt-4"><EmployeesTab /></TabsContent>
+          <TabsContent value="departments" className="mt-4"><DepartmentsTab /></TabsContent>
           <TabsContent value="salaries" className="mt-4"><SalariesTab /></TabsContent>
           <TabsContent value="attendance" className="mt-4"><AttendanceTab /></TabsContent>
-          <TabsContent value="departments" className="mt-4"><DepartmentsTab /></TabsContent>
+          <TabsContent value="meals" className="mt-4"><MealDeductionsTab /></TabsContent>
         </Tabs>
       </div>
     </AdminLayout>
