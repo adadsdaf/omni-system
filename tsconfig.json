@@ -17,11 +17,7 @@
     "jsx": "react-jsx",
     "paths": {
       "@/*": [
-        "./src/*",
-        "./artifacts/pos-system/src/*"
-      ],
-      "@workspace/api-client-react": [
-        "./artifacts/pos-system/src/api-client.ts"
+        "./*"
       ]
     },
     "allowImportingTsExtensions": true,

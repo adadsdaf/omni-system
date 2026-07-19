@@ -1,6 +1,8 @@
 {
-  "name": "Electron POS Packager",
-  "description": "An interactive utility to generate, preview, and configure Electron packaging with splash screens and background server checking for POS systems.",
+  "name": "AI Studio App",
+  "description": "A high-performance workspace app on AI Studio.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
