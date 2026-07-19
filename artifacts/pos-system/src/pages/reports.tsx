@@ -55,19 +55,10 @@ export default function Reports() {
   const totalDiscount = salesRows.reduce((s, r) => s + ((r as any).discount ?? 0), 0);
   const totalTax = salesRows.reduce((s, r) => s + ((r as any).tax ?? 0), 0);
 
-  const handlePrint = async () => {
-    const electronAPI = (window as any).electronAPI;
-    if (electronAPI && electronAPI.isElectron) {
-      try {
-        // Use the selected printer, or fallback if empty or "__window__"
-        const printerName = selectedPrinter && selectedPrinter !== "__window__" ? selectedPrinter : "";
-        await electronAPI.printSilent(printerName);
-        setShowPrintDlg(false);
-      } catch (err) {
-        console.error("Electron silent printing failed for report:", err);
-        window.print();
-        setShowPrintDlg(false);
-      }
+  const handlePrint = () => {
+    if (selectedPrinter === "__window__") {
+      window.print();
+      setShowPrintDlg(false);
     } else {
       window.print();
       setShowPrintDlg(false);

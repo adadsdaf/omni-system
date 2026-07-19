@@ -660,18 +660,7 @@ export default function Pos() {
       });
     });
 
-    const electronAPI = (window as any).electronAPI;
-    if (electronAPI && electronAPI.isElectron) {
-      const printerName = printerSettings?.mainPrinterName || "";
-      try {
-        await electronAPI.printSilent(printerName);
-      } catch (err) {
-        console.error("Electron silent printing failed, falling back to window.print():", err);
-        window.print();
-      }
-    } else {
-      window.print();
-    }
+    window.print();
     setActivePrintPage(null);
     setActivePrintPages([]);
     document.getElementById(styleId)?.remove();
@@ -684,13 +673,7 @@ export default function Pos() {
 
     // 1. Try QZ Tray if connected
     if (qz.connected) {
-      // Standard ESC/POS paper-cut codes to support all printer models:
-      // - \x1D\x56\x42\x00: GS V 66 0 (Feed & Partial cut)
-      // - \x1D\x56\x01: GS V 1 (Partial cut)
-      // - \x1B\x69: ESC i (Epson Full cut)
-      // - \x1B\x6D: ESC m (Star/Epson Partial cut)
-      const cutCommand = "\n\n\n\x1D\x56\x42\x00\x1D\x56\x01\x1B\x69\x1B\x6D";
-      const qzRes = await qz.printData(printerName, content + cutCommand, 1, true);
+      const qzRes = await qz.printData(printerName, content, 1, true);
       if (qzRes.success) {
         return true;
       }

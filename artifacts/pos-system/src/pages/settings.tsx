@@ -955,7 +955,7 @@ function PrinterLayoutTab() {
     });
   };
 
-  const handleTestPrint = async () => {
+  const handleTestPrint = () => {
     const lm = form.leftMargin ?? 4;
     const rm = form.rightMargin ?? 4;
     const pw = form.paperWidth ?? 80;
@@ -979,17 +979,7 @@ function PrinterLayoutTab() {
       }
     `;
     document.head.appendChild(style);
-    const electronAPI = (window as any).electronAPI;
-    if (electronAPI && electronAPI.isElectron) {
-      try {
-        await electronAPI.printSilent(form.mainPrinterName || "");
-      } catch (err) {
-        console.error("Electron silent printing failed:", err);
-        window.print();
-      }
-    } else {
-      window.print();
-    }
+    window.print();
     document.getElementById("__test-print-style__")?.remove();
   };
 
